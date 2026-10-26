@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 
 import pandas as pd
 import streamlit as st
@@ -13,7 +14,7 @@ import streamlit.components.v1 as components
 
 import decharge_ocr as dro
 
-HEADERS = {"COMPTE": "COMPTE", "NGP": "NGP", "ORDRE": "", "QTE NET": "QTE NET", "QTE BRUT": "QTE BRUT", "T/O/N": "T/O/N", "TX %": "TX %"}
+HEADERS = {"COMPTE": "COMPTE", "NGP": "NGP", "ORDRE": "POSITION", "QTE NET": "QTE NET", "QTE BRUT": "QTE BRUT", "T/O/N": "T/O/N", "TX %": "TX %"}
 
 PASTE_JS = """
 <script>
@@ -39,7 +40,28 @@ PASTE_JS = """
 """
 
 
-def build_xlsx(tables: list[dict]) -> bytes:
+def postprocess(t: dict) -> dict:
+    """Règles du tableau final : POSITION vide -> 1 ; QTE BRUT sans nombre (NA / vide) -> égale à QTE NET."""
+    rows = []
+    for r in t["rows"]:
+        r = dict(r)
+        if "ORDRE" in r and not str(r.get("ORDRE", "")).strip():
+            r["ORDRE"] = "1"
+        net = str(r.get("QTE NET", "")).strip()
+        if "QTE BRUT" in r and net and not str(r.get("QTE BRUT", "")).replace(".", "", 1).isdigit():
+            r["QTE BRUT"] = net
+        rows.append(r)
+    return {**t, "rows": rows}
+
+
+def full_compte(row: dict, sep: str = "") -> str:
+    """COMPTE + lettre saisie (ex. 40102220260002977 + K -> 40102220260002977K) : le numéro de déclaration / compte se termine par une lettre."""
+    c = str(row.get("COMPTE", "")).strip()
+    letter = str(row.get("LETTRE", "")).strip().upper()[:1]
+    return f"{c}{sep}{letter}" if c and letter else c
+
+
+def build_xlsx(tables: list[dict], sep: str = "") -> bytes:
     """Excel du client : titre surligné, en-tête bleu, lignes encadrées (un bloc par destinataire sur la feuille DECHARGE) + feuille LISTE à plat."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -53,7 +75,7 @@ def build_xlsx(tables: list[dict]) -> bytes:
     r = 2
     flat = []
     for t in tables:
-        cols = [c for c in t["columns"]]
+        cols = [c for c in t["columns"] if c != "LETTRE"]
         c = ws.cell(r, 1, t["title"])
         c.font, c.fill = Font(bold=False, size=11), title_fill
         r += 1
@@ -63,7 +85,7 @@ def build_xlsx(tables: list[dict]) -> bytes:
         r += 1
         for row in t["rows"]:
             for j, name in enumerate(cols, start=1):
-                v = row.get(name, "")
+                v = full_compte(row, sep) if name == "COMPTE" else row.get(name, "")
                 if name == "ORDRE" and str(v).isdigit():
                     v = int(v)
                 if name in ("QTE NET", "QTE BRUT") and str(v).replace(".", "", 1).isdigit():
@@ -74,7 +96,7 @@ def build_xlsx(tables: list[dict]) -> bytes:
                     cell.number_format = "@"
                 if isinstance(v, (int, float)):
                     cell.alignment = Alignment(horizontal="right")
-            flat.append({"DESTINATAIRE": t["title"], **{HEADERS.get(n, n) or "N°": row.get(n, "") for n in cols}})
+            flat.append({"DESTINATAIRE": t["title"], **{HEADERS.get(n, n): (full_compte(row, sep) if n == "COMPTE" else row.get(n, "")) for n in cols}})
             r += 1
         r += 2
     widths = {1: 24, 2: 14, 3: 8, 4: 12, 5: 12, 6: 10, 7: 10}
@@ -108,6 +130,13 @@ def render():
         files = st.file_uploader("Capture(s) du tableau (PNG, JPG, WEBP) — ou Ctrl+V", type=["png", "jpg", "jpeg", "webp", "bmp"],
                                  accept_multiple_files=True, key="decharge_files")
     cache = st.session_state.setdefault("decharge_cache", {})
+    c1, c2, c3 = st.columns([1, 1, 2])
+    letter = c1.text_input("Lettre pour tous les comptes (facultatif)", max_chars=1, key="dch_letter",
+                           help="Tapez une lettre (ex. K) : elle est mise dans la colonne « Lettre » de chaque ligne. Vous pouvez ensuite changer la lettre d'un compte précis.").strip().upper()
+    sep_label = c2.selectbox("Lettre après le COMPTE", ["collée", "avec un espace"], key="dch_sep",
+                             help="collée : 40102220260002977K · avec un espace : 40102220260002977 K")
+    sep = "" if sep_label == "collée" else " "
+    c3.caption("**POSITION** vide = 1 · **QTE BRUT** « NA » = copie de QTE NET (règles appliquées automatiquement).")
     if not files:
         st.info("Aucune capture pour l'instant. Astuce : Windows + Maj + S, sélectionnez le tableau, puis revenez ici et faites Ctrl+V.")
         return
@@ -139,20 +168,28 @@ def render():
             if not found:
                 st.warning("Aucun tableau reconnu : la capture doit montrer l'en-tête bleu (COMPTE · NGP · QTE NET …). "
                            "Prenez la capture un peu plus large et sans zoom réduit.")
-            for k, t in enumerate(found):
+            for k, t0 in enumerate(found):
+                t = postprocess(t0)
                 title = st.text_input("Destinataire", value=t["title"], key=f"dch_t_{key}_{k}")
-                df = pd.DataFrame(t["rows"], columns=t["columns"]).fillna("")
-                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True, key=f"dch_e_{key}_{k}",
-                                        column_config={"ORDRE": st.column_config.TextColumn("N°", width="small")})
+                cols = ["COMPTE", "LETTRE"] + [c for c in t["columns"] if c != "COMPTE"]
+                df = pd.DataFrame([{**r, "LETTRE": letter} for r in t["rows"]], columns=cols).fillna("")
+                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True, key=f"dch_e_{key}_{k}_{letter}",
+                                        column_config={"ORDRE": st.column_config.TextColumn("POSITION", width="small"),
+                                                       "LETTRE": st.column_config.TextColumn("Lettre", width="small", max_chars=1,
+                                                                                            help="Lettre qui termine le n° de compte / déclaration (ex. K) : "
+                                                                                                 "elle est ajoutée après le COMPTE dans l'Excel.")})
                 rows = edited.fillna("").astype(str).to_dict("records")
-                cur = {"title": title, "columns": t["columns"], "rows": rows}
-                issues = dro.validate(cur)
+                cur = {"title": title, "columns": cols, "rows": rows}
+                issues = dro.validate({"rows": rows})
+                bad_l = [i for i, r in enumerate(rows, start=1) if r.get("LETTRE", "").strip() and not re.fullmatch(r"[A-Za-z]", r["LETTRE"].strip())]
+                if bad_l:
+                    issues.append("lettre : une seule lettre A-Z attendue (ligne " + ", ".join(map(str, bad_l)) + ")")
                 if issues:
                     st.warning("Cellules à vérifier (corrigez-les ci-dessus si besoin) : " + " · ".join(issues[:12]))
                 else:
                     st.success(f"{len(rows)} ligne(s) lue(s) — formats COMPTE / NGP / quantités conformes.")
                 tables.append(cur)
     if tables:
-        data = build_xlsx(tables)
+        data = build_xlsx(tables, sep)
         st.download_button("Télécharger DECHARGE.xlsx", data=data, file_name="DECHARGE.xlsx", type="primary", icon=":material/download:",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dch_dl", use_container_width=True)
