@@ -122,68 +122,7 @@ def build_xlsx(tables: list[dict], sep: str = "") -> bytes:
 
 
 def render():
-    st.markdown("### 📋 DÉCHARGE")
-    t1, t2 = st.tabs(["Tableau reçu en capture (image)", "Fiche d'imputation (PDF de BADR)"])
-    with t1:
-        _render_capture()
-    with t2:
-        _render_imputation()
-
-
-def _render_imputation():
-    import imputation_pdf as ip
-    st.caption("Déposez la **fiche d'imputation** (PDF de BADR, « Régimes économiques en douane ») : le site lit toutes les lignes (compte à apurer + lettre, NGP, ordre, "
-               "quantité, valeur, quantité nette, taux, origine…) et vous rend l'Excel.")
-    ups = st.file_uploader("Fiche(s) d'imputation (PDF)", type=["pdf"], accept_multiple_files=True, key="imput_files")
-    if not ups:
-        return
-    fiches: list[dict] = []
-    for f in ups:
-        try:
-            got = ip.parse(f.getvalue())
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"{f.name} : lecture impossible ({type(exc).__name__}: {exc}).")
-            continue
-        if not got or not any(g["rows"] for g in got):
-            st.warning(f"{f.name} : aucune ligne d'imputation reconnue (le PDF doit être la fiche imprimée par BADR, en texte — pas une image scannée).")
-            continue
-        fiches += got
-    for k, fi in enumerate(fiches):
-        h = fi["header"]
-        with st.expander(f"Fiche {h.get('REFERENCE', '?')} — {h.get('SOUMISSIONNAIRE', '')} · {len(fi['rows'])} ligne(s)", expanded=True):
-            val = f"{h['VALEUR DECLARATION']:,.0f}".replace(",", " ") if "VALEUR DECLARATION" in h else "—"
-            st.markdown(f"**Déclaration** {h.get('REFERENCE', '—')} · **Date** {h.get('DATE', '—')} · **Soumissionnaire** {h.get('SOUMISSIONNAIRE', '—')} "
-                        f"· **Valeur déclaration** {val}")
-            st.caption(f"{h.get('FICHE IMPUTATION', '')} · {h.get('BUREAU', '')}")
-            bad = [m for ok, m in fi["checks"] if not ok]
-            if bad:
-                st.warning("À vérifier : " + " · ".join(bad))
-            elif fi["checks"]:
-                st.success(" · ".join(m for _, m in fi["checks"]))
-            df = pd.DataFrame(fi["rows"], columns=ip.COLUMNS)
-            st.dataframe(df, use_container_width=True, hide_index=True,
-                         column_config={"DATE DU COMPTE": st.column_config.DateColumn(format="DD/MM/YYYY"),
-                                        "VALEUR": st.column_config.NumberColumn(format="%.3f"),
-                                        "QUANTITE": st.column_config.NumberColumn(format="%.3f"),
-                                        "QUANTITE NETTE": st.column_config.NumberColumn(format="%.3f"),
-                                        "TAUX": st.column_config.NumberColumn(format="%.3f")})
-    if fiches:
-        try:
-            import archive_hooks
-            xl = ip.build_xlsx(fiches)
-            archive_hooks.save("imput", "DÉCHARGE", "FICHE IMPUTATION · " + ", ".join(f["header"].get("REFERENCE", "") for f in fiches[:2]),
-                               [f["header"].get("REFERENCE", "") for f in fiches] + [f["header"].get("SOUMISSIONNAIRE", "") for f in fiches]
-                               + [r["COMPTE (compact)"] for f in fiches for r in f["rows"]],
-                               {"lignes": sum(len(f["rows"]) for f in fiches)}, {"FICHE_IMPUTATION.xlsx": xl})
-        except Exception:  # noqa: BLE001
-            pass
-        st.download_button("Télécharger FICHE_IMPUTATION.xlsx", data=ip.build_xlsx(fiches), file_name="FICHE_IMPUTATION.xlsx", type="primary",
-                           icon=":material/download:", key="imput_dl", use_container_width=True,
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-
-def _render_capture():
-    st.markdown("#### Tableau reçu du client")
+    st.markdown("### 📋 DÉCHARGE — tableau reçu du client")
     st.caption("Collez la capture du tableau reçu par mail (**Ctrl+V** sur cette page) ou déposez l'image : le site relit le tableau et vous rend l'Excel. "
                "Une capture entière de l'écran convient (le tableau est repéré par son en-tête bleu) ; plusieurs tableaux sur une capture sont lus ensemble.")
     components.html(PASTE_JS, height=0)
@@ -251,12 +190,5 @@ def _render_capture():
                 tables.append(cur)
     if tables:
         data = build_xlsx(tables, sep)
-        try:
-            import archive_hooks
-            archive_hooks.decharge_done("DÉCHARGE · " + ", ".join(t["title"] for t in tables[:3]),
-                                        [t["title"] for t in tables] + [full_compte(r, sep) for t in tables for r in t["rows"]],
-                                        {"lignes": sum(len(t["rows"]) for t in tables)}, {"DECHARGE.xlsx": data})
-        except Exception:  # noqa: BLE001
-            pass
         st.download_button("Télécharger DECHARGE.xlsx", data=data, file_name="DECHARGE.xlsx", type="primary", icon=":material/download:",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dch_dl", use_container_width=True)
