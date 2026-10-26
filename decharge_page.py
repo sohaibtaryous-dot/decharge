@@ -168,6 +168,15 @@ def _render_imputation():
                                         "QUANTITE NETTE": st.column_config.NumberColumn(format="%.3f"),
                                         "TAUX": st.column_config.NumberColumn(format="%.3f")})
     if fiches:
+        try:
+            import archive_hooks
+            xl = ip.build_xlsx(fiches)
+            archive_hooks.save("imput", "DÉCHARGE", "FICHE IMPUTATION · " + ", ".join(f["header"].get("REFERENCE", "") for f in fiches[:2]),
+                               [f["header"].get("REFERENCE", "") for f in fiches] + [f["header"].get("SOUMISSIONNAIRE", "") for f in fiches]
+                               + [r["COMPTE (compact)"] for f in fiches for r in f["rows"]],
+                               {"lignes": sum(len(f["rows"]) for f in fiches)}, {"FICHE_IMPUTATION.xlsx": xl})
+        except Exception:  # noqa: BLE001
+            pass
         st.download_button("Télécharger FICHE_IMPUTATION.xlsx", data=ip.build_xlsx(fiches), file_name="FICHE_IMPUTATION.xlsx", type="primary",
                            icon=":material/download:", key="imput_dl", use_container_width=True,
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -242,5 +251,12 @@ def _render_capture():
                 tables.append(cur)
     if tables:
         data = build_xlsx(tables, sep)
+        try:
+            import archive_hooks
+            archive_hooks.decharge_done("DÉCHARGE · " + ", ".join(t["title"] for t in tables[:3]),
+                                        [t["title"] for t in tables] + [full_compte(r, sep) for t in tables for r in t["rows"]],
+                                        {"lignes": sum(len(t["rows"]) for t in tables)}, {"DECHARGE.xlsx": data})
+        except Exception:  # noqa: BLE001
+            pass
         st.download_button("Télécharger DECHARGE.xlsx", data=data, file_name="DECHARGE.xlsx", type="primary", icon=":material/download:",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dch_dl", use_container_width=True)

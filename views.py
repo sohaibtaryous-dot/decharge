@@ -351,6 +351,12 @@ def render_import(ocr, ai_cfg, ai_label: str, basis: str):
         result.setdefault("alerts", []).extend(
             shipment.make_alert("Avertissement" if n.startswith("⚠") else "Info", "Vote multi-méthodes", n) for n in c_notes)
         final0 = core.apply_matching(result["lines"], result["refdb"])
+        try:
+            import archive_hooks
+            archive_hooks.new_run("imp")
+            archive_hooks.generated("IMPORT", f"{len(result.get('lines', []))} ligne(s)")
+        except Exception:  # noqa: BLE001
+            pass
         st.session_state["result"] = result
         st.session_state["lines_edit"] = final0
         st.session_state["manifest_edit"] = result["manifest"]
@@ -491,6 +497,15 @@ def render_import(ocr, ai_cfg, ai_label: str, basis: str):
             csv_bytes = final[core.COLUMNS].to_csv(sep=";", index=False, decimal=",").encode("utf-8-sig")
             st.download_button("CSV", data=csv_bytes, file_name=f"TOUS_CLIENTS_{stamp}.csv",
                                mime="text/csv", use_container_width=True, icon=":material/csv:", key="dl_csv")
+
+    try:                                                           # archive du dossier (tableau Excel TOUS_CLIENTS + ventilations)
+        import archive_hooks
+        arch_files = {"TOUS_CLIENTS.xlsx": xlsx or b""}
+        if dres:
+            arch_files.update({fn: fd for fn, fd in dres["files"].items()})
+        archive_hooks.import_done(final, arch_files, result)
+    except Exception:  # noqa: BLE001
+        pass
 
     # ---------------- Résumé
     with t_sum:
@@ -673,7 +688,16 @@ def current_user() -> dict | None:
     return st.session_state.get("auth_user")
 
 
+def _journal(email: str, action: str, detail: str = ""):
+    try:
+        import archive
+        archive.log(email, action, detail)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def logout():
+    _journal((st.session_state.get("auth_user") or {}).get("email", ""), "logout")
     st.session_state.clear()
     st.rerun()
 
@@ -877,6 +901,7 @@ def _auth_forms():
                 st.warning(maintenance_message())
             elif code == "ok":
                 st.session_state["auth_user"] = user
+                _journal(user.get("email", ""), "login")
                 st.rerun()
             elif code == "unverified":
                 st.session_state["verify_email"] = user["email"]
@@ -887,10 +912,13 @@ def _auth_forms():
                 else:
                     st.rerun()
             elif code == "pending":
+                _journal(email, "login_failed", "compte non validé")
                 st.warning("Votre compte n'a pas encore été validé par l'administrateur.")
             elif code == "locked":
+                _journal(email, "login_failed", "compte verrouillé (trop d'essais)")
                 st.error("Trop de tentatives échouées. Réessayez dans 15 minutes.")
             else:
+                _journal(email, "login_failed", "e-mail ou mot de passe incorrect")
                 st.error("E-mail ou mot de passe incorrect.")
     with tab_up:
         with st.form("form_signup"):
@@ -1042,6 +1070,8 @@ def dispatch_box(files: dict[str, bytes], default_name: str = "", key: str = "ds
     if st.button("Envoyer le dossier aux utilisateurs choisis", type="primary", icon=":material/send:", key=f"{key}_go",
                  disabled=not dests or not send):
         ok, msg = database.dispatch_dossier(name, dests, send)
+        if ok:
+            _journal(st.session_state.get("auth_user", {}).get("email", ""), "dispatch", f"{name} → {', '.join(dests)} · {len(send)} fichier(s)")
         (st.success if ok else st.error)(msg)
 
 
@@ -1061,8 +1091,9 @@ def render_admin_panel():
                  "restauration n'a pas réussi. Évitez d'accepter des comptes maintenant ; faites « Reboot app » dans quelques minutes.",
                  icon=":material/cloud_off:")
     pending = database.list_users(status="pending", role="user")
-    t1, t2, t3, t4, t5 = st.tabs([f"Demandes d'Accès & Attribution ({len(pending)})", "Utilisateurs actifs",
-                                  "Attribuer des fichiers", "Historique des dispatchs", "Paramètres du site"])
+    t1, t2, t3, t4, t5, t6, t7 = st.tabs([f"Demandes d'Accès & Attribution ({len(pending)})", "Utilisateurs actifs",
+                                          "Attribuer des fichiers", "Historique des dispatchs", "Paramètres du site",
+                                          "Journal d'activité", "Tableau de bord"])
     with t1:
         ui.section("Demandes d'accès en attente", "🕓")
         if not pending:
@@ -1075,6 +1106,7 @@ def render_admin_panel():
             if c2.button("Approuver", type="primary", key=f"ap_{u['id']}", icon=":material/check:", use_container_width=True):
                 plan, months = PLAN_CHOICES[dur]
                 database.approve_user(u["email"], months, plan)
+                _journal(st.session_state.get("auth_user", {}).get("email", ""), "approve", f"{u['email']} · {dur}")
                 st.toast(f"{u['email']} approuvé.")
                 st.rerun()
             if c3.button("Refuser / Supprimer", key=f"rf_{u['id']}", icon=":material/delete:", use_container_width=True):
@@ -1215,6 +1247,12 @@ def render_admin_panel():
             st.cache_resource.clear()
             st.success("Modèle IMPORT remplacé.")
         st.caption("Modèle actuel : " + ("téléversé par l'administrateur" if vx.override_path("import").is_file() else "modèle livré avec l'application"))
+    with t6:
+        import archive_page
+        archive_page.render_journal()
+    with t7:
+        import archive_page
+        archive_page.render_dashboard()
 
 
 def render_ngp_additions(final: pd.DataFrame, result: dict):

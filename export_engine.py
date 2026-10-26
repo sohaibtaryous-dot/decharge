@@ -1576,6 +1576,11 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
         if not imp and "exp_files" in st.session_state:
             st.session_state["exp_files"][f"VENTILATION_{suffix}.xlsx"] = cur["bytes"]      # inclus dans l'attribution aux clients
             st.session_state["exp_files"][f"ANNEXE_{suffix}.xlsx"] = cur["annexe"]
+        try:
+            import archive_hooks
+            archive_hooks.ventilation_done("imp" if imp else "exp", cur, cur["dest"])
+        except Exception:  # noqa: BLE001
+            pass
         d1, d2 = st.columns(2)
         d1.download_button(f"VENTILATION_{suffix}.xlsx — {cur['dest']}", data=cur["bytes"], file_name=f"VENTILATION_{suffix}.xlsx",
                            icon=":material/download:", type="primary", key=f"dl_{P}", use_container_width=True,
@@ -1646,6 +1651,12 @@ def render_export(ocr, ai_cfg=None, ai_label: str = ""):
             return
         st.session_state["exp_result"] = r
         st.session_state["exp_ver"] = st.session_state.get("exp_ver", 0) + 1
+        try:
+            import archive_hooks
+            archive_hooks.new_run("exp")
+            archive_hooks.generated("EXPORT", f"{len(r['factures'])} facture(s) · {r['blref']['BL Number (Bon de Livraison)'].nunique()} BL")
+        except Exception:  # noqa: BLE001
+            pass
         progress.progress(1.0, text="✅ Les 2 fichiers Excel sont prêts.")
         st.rerun()
 
@@ -1703,6 +1714,11 @@ def render_export(ocr, ai_cfg=None, ai_label: str = ""):
     recap_bytes = build_recap_xlsx(fact_final, bl_final, rep)
     st.session_state["exp_files"] = {"FACTURES.xlsx": fact_bytes, "BL_REFERENCES_SUMMARY.xlsx": bl_bytes,
                                      "RECAP_DOUANE.xlsx": recap_bytes}
+    try:                                                  # archive du dossier (journal + recherche par n° de facture / BL / client)
+        import archive_hooks
+        archive_hooks.export_done(fact_final, bl_final, rep, st.session_state["exp_files"])
+    except Exception:  # noqa: BLE001
+        pass
     report = report_text(rep, checks)
 
     with t_dash:

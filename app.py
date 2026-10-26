@@ -3278,6 +3278,7 @@ def main():
         ui.sidebar_cap("Module", "layers")
         modules = [":material/move_to_inbox: IMPORT — Ventilation groupage", ":material/outbox: EXPORT — BL & Factures"]
         modules += [":material/receipt_long: DÉCHARGE — Tableau depuis capture"]
+        modules += [":material/inventory_2: ARCHIVE — Dossiers & recherche"]
         modules += [":material/admin_panel_settings: ADMIN — Gestion des Accès & Dispatch"] if is_admin else \
                    [":material/folder_open: MES FICHIERS — Dossiers reçus"]
         module = st.radio("Module", modules, key="module")
@@ -3285,8 +3286,9 @@ def main():
         is_files = "MES FICHIERS" in module
         is_export = "EXPORT" in module
         is_decharge = "DÉCHARGE" in module
+        is_archive = "ARCHIVE" in module
         ai_cfg, ocr, basis = None, None, "Valeur HT"
-        if not (is_admin_panel or is_files or is_decharge):
+        if not (is_admin_panel or is_files or is_decharge or is_archive):
             ai_cfg = sidebar_ai()
             if not is_export:
                 ui.sidebar_cap("Ventilation des poids", "scale")
@@ -3323,6 +3325,14 @@ def main():
         return
     if is_files:
         views.render_user_space(user)
+        ui.footer()
+        return
+    if is_archive:
+        try:
+            import archive_page
+            archive_page.render(user)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Module ARCHIVE indisponible ({type(exc).__name__}: {exc}).")
         ui.footer()
         return
     if is_decharge:

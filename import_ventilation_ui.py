@@ -189,6 +189,11 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
         if not imp and "exp_files" in st.session_state:
             st.session_state["exp_files"][f"VENTILATION_{suffix}.xlsx"] = cur["bytes"]      # inclus dans l'attribution aux clients
             st.session_state["exp_files"][f"ANNEXE_{suffix}.xlsx"] = cur["annexe"]
+        try:
+            import archive_hooks
+            archive_hooks.ventilation_done("imp" if imp else "exp", cur, cur["dest"])
+        except Exception:  # noqa: BLE001
+            pass
         d1, d2 = st.columns(2)
         d1.download_button(f"VENTILATION_{suffix}.xlsx — {cur['dest']}", data=cur["bytes"], file_name=f"VENTILATION_{suffix}.xlsx",
                            icon=":material/download:", type="primary", key=f"dl_{P}", use_container_width=True,
