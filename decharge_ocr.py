@@ -23,7 +23,7 @@ os.environ.setdefault("OMP_THREAD_LIMIT", "1")                  # Tesseract mono
 COLUMNS7 = ["COMPTE", "NGP", "ORDRE", "QTE NET", "QTE BRUT", "T/O/N", "TX %"]
 COLUMNS6 = ["COMPTE", "NGP", "QTE NET", "QTE BRUT", "T/O/N", "TX %"]
 WHITELIST = {"COMPTE": "0123456789", "NGP": "0123456789", "ORDRE": "0123456789", "QTE NET": "0123456789",
-             "QTE BRUT": "0123456789NA", "T/O/N": "0123456789NATO", "TX %": "0123456789NA%"}
+             "QTE BRUT": "0123456789NA", "T/O/N": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/", "TX %": "0123456789NA%.,"}
 
 
 def _runs(mask_1d: np.ndarray) -> list[tuple[int, int]]:

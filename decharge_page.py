@@ -130,13 +130,12 @@ def render():
         files = st.file_uploader("Capture(s) du tableau (PNG, JPG, WEBP) — ou Ctrl+V", type=["png", "jpg", "jpeg", "webp", "bmp"],
                                  accept_multiple_files=True, key="decharge_files")
     cache = st.session_state.setdefault("decharge_cache", {})
-    c1, c2, c3 = st.columns([1, 1, 2])
-    letter = c1.text_input("Lettre pour tous les comptes (facultatif)", max_chars=1, key="dch_letter",
-                           help="Tapez une lettre (ex. K) : elle est mise dans la colonne « Lettre » de chaque ligne. Vous pouvez ensuite changer la lettre d'un compte précis.").strip().upper()
-    sep_label = c2.selectbox("Lettre après le COMPTE", ["collée", "avec un espace"], key="dch_sep",
+    c1, c2 = st.columns([1, 2])
+    sep_label = c1.selectbox("Lettre après le COMPTE", ["collée", "avec un espace"], key="dch_sep",
                              help="collée : 40102220260002977K · avec un espace : 40102220260002977 K")
     sep = "" if sep_label == "collée" else " "
-    c3.caption("**POSITION** vide = 1 · **QTE BRUT** « NA » = copie de QTE NET (règles appliquées automatiquement).")
+    c2.caption("**Lettre** : tapez la lettre de chaque ligne dans la colonne « Lettre » du tableau (elle est ajoutée après le COMPTE dans l'Excel). "
+               "**POSITION** vide = 1 · **QTE BRUT** « NA » = copie de QTE NET.")
     if not files:
         st.info("Aucune capture pour l'instant. Astuce : Windows + Maj + S, sélectionnez le tableau, puis revenez ici et faites Ctrl+V.")
         return
@@ -172,8 +171,8 @@ def render():
                 t = postprocess(t0)
                 title = st.text_input("Destinataire", value=t["title"], key=f"dch_t_{key}_{k}")
                 cols = ["COMPTE", "LETTRE"] + [c for c in t["columns"] if c != "COMPTE"]
-                df = pd.DataFrame([{**r, "LETTRE": letter} for r in t["rows"]], columns=cols).fillna("")
-                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True, key=f"dch_e_{key}_{k}_{letter}",
+                df = pd.DataFrame([{**r, "LETTRE": ""} for r in t["rows"]], columns=cols).fillna("")
+                edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True, key=f"dch_e_{key}_{k}",
                                         column_config={"ORDRE": st.column_config.TextColumn("POSITION", width="small"),
                                                        "LETTRE": st.column_config.TextColumn("Lettre", width="small", max_chars=1,
                                                                                             help="Lettre qui termine le n° de compte / déclaration (ex. K) : "
