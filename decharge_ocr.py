@@ -220,12 +220,12 @@ def _cell_glyphs(img: Image.Image, box, dark: bool):
     if abs(ext - bg) < 40:
         return []
     a = np.clip((g - bg) / (ext - bg), 0, 1)
-    ink = a > 0.35
+    ink = a > 0.5
     cols = ink.any(0)
     out = []
     for c0, c1 in _runs(cols):
         sub = a[:, c0:c1 + 1]
-        rows = np.where((sub > 0.35).any(1))[0]
+        rows = np.where((sub > 0.5).any(1))[0]
         if len(rows) == 0:
             continue
         out.append(sub[rows.min(): rows.max() + 1])
@@ -246,17 +246,33 @@ def _glyph_dist(a: np.ndarray, b: np.ndarray) -> float:
     return best
 
 
+def _pad(g: np.ndarray, H: int, W: int) -> np.ndarray:
+    out = np.zeros((H, W))
+    h, w = min(g.shape[0], H), min(g.shape[1], W - 3)
+    out[:h, 1:1 + w] = g[:h, :w]
+    return out
+
+
 def _classify(glyphs, templates: dict) -> tuple[str, float]:
-    """Chiffres d'une cellule d'après les gabarits ; renvoie (texte, pire distance)."""
+    """Chiffres d'une cellule d'après les gabarits (tous les gabarits comparés d'un coup, décalage horizontal de ±1 px toléré)."""
+    keys, mats = [], []
+    H = max([g.shape[0] for ts in templates.values() for g in ts] + [g.shape[0] for g in glyphs]) + 1
+    W = max([g.shape[1] for ts in templates.values() for g in ts] + [g.shape[1] for g in glyphs]) + 3
+    for ch, ts in templates.items():
+        for t in ts:
+            keys.append(ch)
+            mats.append(_pad(t, H, W))
+    T = np.stack(mats)
     txt, worst = "", 0.0
     for gl in glyphs:
-        best, bd = "", 9.0
-        for ch, samples in templates.items():
-            d = min(_glyph_dist(gl, t) for t in samples)
-            if d < bd:
-                best, bd = ch, d
-        txt += best
-        worst = max(worst, bd)
+        g = _pad(gl, H, W)
+        best = np.full(len(keys), 9.0)
+        for dx in (-1, 0, 1):
+            gs = np.roll(g, dx, axis=1)
+            best = np.minimum(best, np.abs(T - gs).mean(axis=(1, 2)))
+        k = int(best.argmin())
+        txt += keys[k]
+        worst = max(worst, float(best[k]))
     return txt, worst
 
 

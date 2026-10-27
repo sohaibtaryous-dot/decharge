@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+import compte_memory as cm
 import decharge_ocr as dro
 
 HEADERS = {"COMPTE": "COMPTE", "NGP": "NGP", "ORDRE": "POSITION", "QTE NET": "QTE NET", "QTE BRUT": "QTE BRUT", "T/O/N": "T/O/N", "TX %": "TX %"}
@@ -38,6 +39,10 @@ PASTE_JS = """
 })();
 </script>
 """
+
+
+def _me() -> str:
+    return ((st.session_state.get("auth_user") or {}).get("email") or "")
 
 
 def postprocess(t: dict) -> dict:
@@ -122,7 +127,120 @@ def build_xlsx(tables: list[dict], sep: str = "") -> bytes:
 
 
 def render():
-    st.markdown("### 📋 DÉCHARGE — tableau reçu du client")
+    st.markdown("### 📋 DÉCHARGE")
+    t1, t2, t3 = st.tabs(["Tableau reçu en capture (image)", "Fiche d'imputation (PDF de BADR)", "Mémoire des lettres"])
+    with t1:
+        _render_capture()
+    with t2:
+        _render_imputation()
+    with t3:
+        _render_memory()
+
+
+def _render_imputation():
+    import imputation_pdf as ip
+    st.caption("Déposez la **fiche d'imputation** (PDF de BADR, « Régimes économiques en douane ») : le site lit toutes les lignes (compte à apurer + lettre, NGP, ordre, "
+               "quantité, valeur, quantité nette, taux, origine…) et vous rend l'Excel.")
+    ups = st.file_uploader("Fiche(s) d'imputation (PDF)", type=["pdf"], accept_multiple_files=True, key="imput_files")
+    if not ups:
+        return
+    fiches: list[dict] = []
+    for f in ups:
+        try:
+            got = ip.parse(f.getvalue())
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"{f.name} : lecture impossible ({type(exc).__name__}: {exc}).")
+            continue
+        if not got or not any(g["rows"] for g in got):
+            st.warning(f"{f.name} : aucune ligne d'imputation reconnue (le PDF doit être la fiche imprimée par BADR, en texte — pas une image scannée).")
+            continue
+        fiches += got
+    mem_n = 0
+    for fi in fiches:                                                       # les lettres des comptes de la fiche alimentent la mémoire du site
+        mem_n += cm.remember({r["COMPTE A APURER"]: r["COMPTE A APURER"][-1] for r in fi["rows"]}, "fiche " + fi["header"].get("REFERENCE", ""), _me())
+    if mem_n:
+        st.toast(f"{mem_n} lettre(s) de compte mémorisée(s).", icon="🔤")
+    allp = {r["COMPTE A APURER"]: r["COMPTE A APURER"][-1] for fi in fiches for r in fi["rows"]}
+    ok_f, tot_f, bad_f = cm.check_formula(allp)
+    if tot_f:
+        (st.success if not bad_f else st.warning)(f"Contrôle de la formule de lettre : {ok_f}/{tot_f} comptes de cette fiche retrouvés par le calcul"
+                                                    + ("" if not bad_f else " — écarts : " + ", ".join(bad_f[:6])) + ".")
+    for k, fi in enumerate(fiches):
+        h = fi["header"]
+        with st.expander(f"Fiche {h.get('REFERENCE', '?')} — {h.get('SOUMISSIONNAIRE', '')} · {len(fi['rows'])} ligne(s)", expanded=True):
+            val = f"{h['VALEUR DECLARATION']:,.0f}".replace(",", " ") if "VALEUR DECLARATION" in h else "—"
+            st.markdown(f"**Déclaration** {h.get('REFERENCE', '—')} · **Date** {h.get('DATE', '—')} · **Soumissionnaire** {h.get('SOUMISSIONNAIRE', '—')} "
+                        f"· **Valeur déclaration** {val}")
+            st.caption(f"{h.get('FICHE IMPUTATION', '')} · {h.get('BUREAU', '')}")
+            bad = [m for ok, m in fi["checks"] if not ok]
+            if bad:
+                st.warning("À vérifier : " + " · ".join(bad))
+            elif fi["checks"]:
+                st.success(" · ".join(m for _, m in fi["checks"]))
+            df = pd.DataFrame(fi["rows"], columns=ip.COLUMNS)
+            st.dataframe(df, use_container_width=True, hide_index=True,
+                         column_config={"DATE DU COMPTE": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                                        "VALEUR": st.column_config.NumberColumn(format="%.3f"),
+                                        "QUANTITE": st.column_config.NumberColumn(format="%.3f"),
+                                        "QUANTITE NETTE": st.column_config.NumberColumn(format="%.3f"),
+                                        "TAUX": st.column_config.NumberColumn(format="%.3f")})
+    if fiches:
+        try:
+            import archive_hooks
+            xl = ip.build_xlsx(fiches)
+            archive_hooks.save("imput", "DÉCHARGE", "FICHE IMPUTATION · " + ", ".join(f["header"].get("REFERENCE", "") for f in fiches[:2]),
+                               [f["header"].get("REFERENCE", "") for f in fiches] + [f["header"].get("SOUMISSIONNAIRE", "") for f in fiches]
+                               + [r["COMPTE (compact)"] for f in fiches for r in f["rows"]],
+                               {"lignes": sum(len(f["rows"]) for f in fiches)}, {"FICHE_IMPUTATION.xlsx": xl})
+        except Exception:  # noqa: BLE001
+            pass
+        st.download_button("Télécharger FICHE_IMPUTATION.xlsx", data=ip.build_xlsx(fiches), file_name="FICHE_IMPUTATION.xlsx", type="primary",
+                           icon=":material/download:", key="imput_dl", use_container_width=True,
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def _render_memory():
+    st.caption("Chaque compte a une **lettre** (calculée par BADR). Le site la retient dès qu'il la connaît — lue dans une **fiche d'imputation**, saisie une fois dans "
+               "le tableau, ou importée ci-dessous — et la remet automatiquement dans les prochains dossiers.")
+    st.metric("Comptes avec lettre mémorisée", cm.count())
+    ok_f, tot_f, bad_f = cm.check_formula(cm.all_pairs())
+    if tot_f:
+        (st.success if not bad_f else st.warning)(f"Formule de calcul de la lettre vérifiée sur {ok_f}/{tot_f} comptes réels mémorisés"
+                                                    + ("" if not bad_f else " — en désaccord : " + ", ".join(bad_f[:8])) + ".")
+    with st.expander("Importer une liste de comptes + lettres", expanded=False):
+        txt = st.text_area("Collez des lignes « compte lettre » (ex. 411 023 2025 0014953 D, ou 41102320250014953D, ou 41102320250014953;D)", height=140, key="cm_paste")
+        up = st.file_uploader("… ou déposez un fichier Excel / CSV / texte (colonnes compte et lettre, ou compte avec sa lettre)", type=["xlsx", "csv", "txt"], key="cm_file")
+        if st.button("Mémoriser", type="primary", key="cm_go", icon=":material/save:"):
+            text = txt or ""
+            if up is not None:
+                try:
+                    if up.name.lower().endswith(".xlsx"):
+                        text += "\n" + "\n".join(" ".join(str(c) for c in row if c is not None) for row in pd.read_excel(up, header=None).values.tolist())
+                    else:
+                        text += "\n" + up.getvalue().decode("utf-8", "ignore")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Fichier illisible ({type(exc).__name__}).")
+            pairs = cm.parse_pairs(text)
+            n = cm.remember(pairs, "import", _me())
+            st.success(f"{len(pairs)} paire(s) lue(s), {n} nouvelle(s) ou modifiée(s).") if pairs else st.warning("Aucune paire « compte + lettre » reconnue.")
+    q = st.text_input("Rechercher (n° de compte, lettre, source)", key="cm_q")
+    rows = cm.listing(q, 1000)
+    if rows:
+        df = pd.DataFrame([{"Compte": r["compte"], "Lettre": r["letter"], "Compte + lettre": r["compte"] + r["letter"], "Source": r["source"],
+                            "Date": pd.to_datetime(r["ts"], unit="s").strftime("%d/%m/%Y")} for r in rows])
+        st.dataframe(df, use_container_width=True, hide_index=True, height=360)
+        st.download_button("Télécharger la liste (CSV)", data=df.to_csv(sep=";", index=False).encode("utf-8-sig"), file_name="LETTRES_COMPTES.csv", mime="text/csv",
+                           icon=":material/download:", key="cm_dl")
+        rm = st.selectbox("Supprimer un compte de la mémoire", [""] + [r["compte"] + r["letter"] for r in rows[:200]], key="cm_rm")
+        if rm and st.button("Supprimer", key="cm_rm_go", icon=":material/delete:"):
+            cm.remove(rm[:-1])
+            st.rerun()
+    else:
+        st.info("Mémoire vide pour l'instant.")
+
+
+def _render_capture():
+    st.markdown("#### Tableau reçu du client")
     st.caption("Collez la capture du tableau reçu par mail (**Ctrl+V** sur cette page) ou déposez l'image : le site relit le tableau et vous rend l'Excel. "
                "Une capture entière de l'écran convient (le tableau est repéré par son en-tête bleu) ; plusieurs tableaux sur une capture sont lus ensemble.")
     components.html(PASTE_JS, height=0)
@@ -171,13 +289,30 @@ def render():
                 t = postprocess(t0)
                 title = st.text_input("Destinataire", value=t["title"], key=f"dch_t_{key}_{k}")
                 cols = ["COMPTE", "LETTRE"] + [c for c in t["columns"] if c != "COMPTE"]
-                df = pd.DataFrame([{**r, "LETTRE": ""} for r in t["rows"]], columns=cols).fillna("")
+                mem = cm.known([r.get("COMPTE", "") for r in t["rows"]])
+                src = []                                           # origine de la lettre proposée : mémoire (réelle) ou calcul
+                init = []
+                for r in t["rows"]:
+                    d = cm.digits(r.get("COMPTE", ""))
+                    if d in mem:
+                        init.append(mem[d]); src.append("mémoire")
+                    elif cm.compute_letter(d):
+                        init.append(cm.compute_letter(d)); src.append("calcul")
+                    else:
+                        init.append(""); src.append("")
+                df = pd.DataFrame([{**r, "LETTRE": l} for r, l in zip(t["rows"], init)], columns=cols).fillna("")
                 edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True, key=f"dch_e_{key}_{k}",
                                         column_config={"ORDRE": st.column_config.TextColumn("POSITION", width="small"),
                                                        "LETTRE": st.column_config.TextColumn("Lettre", width="small", max_chars=1,
                                                                                             help="Lettre qui termine le n° de compte / déclaration (ex. K) : "
                                                                                                  "elle est ajoutée après le COMPTE dans l'Excel.")})
                 rows = edited.fillna("").astype(str).to_dict("records")
+                # une lettre différente de celle proposée par le calcul (correction saisie d'après BADR) est gardée pour les prochains dossiers
+                cm.remember({r["COMPTE"]: r["LETTRE"] for r in rows if r.get("LETTRE", "").strip()
+                             and r["LETTRE"].strip().upper() != cm.compute_letter(r["COMPTE"])}, "saisie DÉCHARGE", _me())
+                n_known = sum(1 for r in rows if r.get("LETTRE", "").strip())
+                n_calc = sum(1 for s_, r in zip(src, rows) if s_ == "calcul" and r.get("LETTRE", "").strip().upper() == cm.compute_letter(r["COMPTE"]))
+                n_mem = sum(1 for s_ in src if s_ == "mémoire")
                 cur = {"title": title, "columns": cols, "rows": rows}
                 issues = dro.validate({"rows": rows})
                 bad_l = [i for i, r in enumerate(rows, start=1) if r.get("LETTRE", "").strip() and not re.fullmatch(r"[A-Za-z]", r["LETTRE"].strip())]
@@ -187,8 +322,22 @@ def render():
                     st.warning("Cellules à vérifier (corrigez-les ci-dessus si besoin) : " + " · ".join(issues[:12]))
                 else:
                     st.success(f"{len(rows)} ligne(s) lue(s) — formats COMPTE / NGP / quantités conformes.")
+                ok_f, tot_f, _bad = cm.check_formula(cm.all_pairs())
+                msg = (f"Lettres : {n_mem} depuis la mémoire (lettres réelles BADR) · {n_calc} **calculées** par la formule"
+                       + (f" (vérifiée sur {ok_f}/{tot_f} comptes réels)" if tot_f else "") + f" · {len(rows) - n_known} manquante(s).")
+                if n_calc:
+                    msg += (" Les lettres calculées sont à confirmer au premier usage dans BADR ; si BADR en indique une autre, saisissez-la dans la colonne « Lettre » : "
+                            "le site la retient et elle remplace le calcul.")
+                st.info(msg) if n_calc or n_known < len(rows) else st.success("Tous les comptes ont leur lettre (mémoire).")
                 tables.append(cur)
     if tables:
         data = build_xlsx(tables, sep)
+        try:
+            import archive_hooks
+            archive_hooks.decharge_done("DÉCHARGE · " + ", ".join(t["title"] for t in tables[:3]),
+                                        [t["title"] for t in tables] + [full_compte(r, sep) for t in tables for r in t["rows"]],
+                                        {"lignes": sum(len(t["rows"]) for t in tables)}, {"DECHARGE.xlsx": data})
+        except Exception:  # noqa: BLE001
+            pass
         st.download_button("Télécharger DECHARGE.xlsx", data=data, file_name="DECHARGE.xlsx", type="primary", icon=":material/download:",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dch_dl", use_container_width=True)
