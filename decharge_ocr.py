@@ -111,6 +111,11 @@ def _grid(arr: np.ndarray, hdr: tuple[int, int, int, int]):
     xs = _cluster(np.where(vl >= 0.85 * (ys[-1] - ys[0]))[0])
     ys = [y + y1 + 1 for y in ys]
     xs = [x + max(0, x0 - 4) for x in xs]
+    if xs:                                   # bords gauche / droit du tableau coupés par la capture : l'en-tête bleu donne la largeur réelle
+        if xs[0] - x0 > 8:
+            xs.insert(0, x0)
+        if x1 - xs[-1] > 8:
+            xs.append(x1)
     # dernière ligne parfois sans cadre complet (traits partiels) : on l'ajoute si du texte y figure
     rh = int(np.median(np.diff(ys))) if len(ys) > 1 else 0
     for _ in range(3):
@@ -209,26 +214,42 @@ def _vote(img: Image.Image, box: tuple[int, int, int, int], dark: bool, col: str
 
 # --------------------------------------------------------------------------- reconnaissance par gabarits (police de la capture)
 def _cell_glyphs(img: Image.Image, box, dark: bool):
-    """Caractères d'une cellule : liste de tableaux (0 = fond, 1 = encre), séparés par les colonnes vides."""
+    """Caractères d'une cellule : liste de tableaux (0 = fond, 1 = encre), séparés par les colonnes vides. Les pixels colorés (petit triangle vert d'Excel…)
+    sont ignorés ; un bloc deux fois plus large qu'un chiffre (chiffres collés) est coupé en parts égales."""
     x0, x1, y0, y1 = box
     inner = img.crop((x0 + 4, y0 + 3, x1 - 3, y1 - 2))
     if inner.width < 4 or inner.height < 4:
         return []
-    g = np.asarray(inner.convert("L")).astype(float)
+    rgb = np.asarray(inner).astype(float)
+    g = rgb.mean(axis=2)
+    sat = rgb.max(axis=2) - rgb.min(axis=2)
     bg = float(np.median(g))
+    g = np.where(sat > 70, bg, g)                                           # pixel coloré = pas du texte
     ext = g.max() if dark else g.min()
     if abs(ext - bg) < 40:
         return []
     a = np.clip((g - bg) / (ext - bg), 0, 1)
     ink = a > 0.5
     cols = ink.any(0)
+    runs = _runs(cols)
+    if not runs:
+        return []
+    widths = sorted(r1 - r0 + 1 for r0, r1 in runs)
+    med = widths[len(widths) // 2]
     out = []
-    for c0, c1 in _runs(cols):
-        sub = a[:, c0:c1 + 1]
-        rows = np.where((sub > 0.5).any(1))[0]
-        if len(rows) == 0:
-            continue
-        out.append(sub[rows.min(): rows.max() + 1])
+    for c0, c1 in runs:
+        w = c1 - c0 + 1
+        parts = [(c0, c1)]
+        if med >= 4 and w > 1.7 * med:
+            k = max(2, round(w / med))
+            step = w / k
+            parts = [(c0 + int(round(i * step)), c0 + int(round((i + 1) * step)) - 1) for i in range(k)]
+        for p0, p1 in parts:
+            sub = a[:, p0:p1 + 1]
+            rows = np.where((sub > 0.5).any(1))[0]
+            if len(rows) == 0:
+                continue
+            out.append(sub[rows.min(): rows.max() + 1])
     return out
 
 
@@ -308,17 +329,19 @@ def read_table(img: Image.Image, hdr, arr: np.ndarray) -> dict | None:
                 for ch, g in zip(txt, gl):
                     templates.setdefault(ch, []).append(g)
     tmpl_ok = len(templates) >= 8
-    fixed = 0
+    expect = {"COMPTE": 17, "NGP": 10}
     if tmpl_ok:
         for (i, j), txt in list(ocr.items()):
-            if names[j] in ("COMPTE", "NGP", "ORDRE", "QTE NET") and (re.fullmatch(r"\d+", txt or "") or txt == ""):
+            col = names[j]
+            if col in ("COMPTE", "NGP", "ORDRE", "QTE NET") and (re.fullmatch(r"\d+", txt or "") or txt == ""):
                 gl = _cell_glyphs(img, boxes[(i, j)], dark)
                 if not gl:
                     continue
                 t2, worst = _classify(gl, templates)
-                if worst < 0.2 and t2 != txt:
+                n = expect.get(col)
+                good = (len(gl) == n and worst < 0.3) if n else worst < 0.2          # COMPTE / NGP : longueur connue, seuil plus large
+                if good and t2 != txt:
                     ocr[(i, j)] = t2
-                    fixed += 1
     rows = []
     for i in range(len(ys) - 1):
         row = {names[j]: ocr[(i, j)] for j in range(ncol)}
