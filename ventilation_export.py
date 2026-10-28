@@ -212,6 +212,36 @@ def _hu_of(r) -> str | None:
     return None if v is None or (isinstance(v, float) and v != v) else str(v)
 
 
+def _hu_net_of(r) -> float | None:
+    v = r.get("_hu_net") if hasattr(r, "get") else None
+    try:
+        return None if v is None or v != v else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def unit_check(vent: Ventilation) -> pd.DataFrame:
+    """Contrôle par unité de manutention : poids net lu dans la packing list vs somme des poids des lignes ventilées de cette unité
+    (tous articles confondus). Une unité dont des références sont dans un autre article ou dont une ligne n'est pas ventilée peut différer."""
+    rows: dict = {}
+    for ai, a in enumerate(vent.articles, start=1):
+        for l in a.lines:
+            if not l.get("hu"):
+                continue
+            r = rows.setdefault((str(l.get("bl", "")), str(l["hu"])), {"BL": str(l.get("bl", "")), "Unité": str(l["hu"]), "Poids packing list (kg)": l.get("hu_net"),
+                                                                       "Poids ventilé (kg)": 0.0, "Lignes": 0, "Articles": set()})
+            r["Poids ventilé (kg)"] += float(l["net"])
+            r["Lignes"] += 1
+            r["Articles"].add(ai)
+    out = []
+    for r in rows.values():
+        ref = r["Poids packing list (kg)"]
+        out.append({**{k: v for k, v in r.items() if k != "Articles"}, "Articles": ", ".join(str(x) for x in sorted(r["Articles"])),
+                    "Poids ventilé (kg)": round(r["Poids ventilé (kg)"], 3),
+                    "Écart (kg)": round(r["Poids ventilé (kg)"] - ref, 3) if ref is not None else None})
+    return pd.DataFrame(out)
+
+
 def _apply_hu_weights(df: pd.DataFrame) -> list[str]:
     """Poids net lus dans la packing list (colonnes `_hu` / `_hu_net`, voir pl_weights) : une référence seule dans son unité de manutention
     garde son poids exact ; les références d'une même unité se partagent le poids de l'unité (au prorata de la valeur) ; seules les lignes
@@ -293,7 +323,7 @@ def build_ventilation(bl_df: pd.DataFrame, reference: Reference, guess: bool = T
             articles[key] = Article(art["ngp"], art["rubrique"], art["name"]) if art else Article("", UNCLASSIFIED, UNCLASSIFIED)
         articles[key].lines.append({"ref": ref, "desc": str(r.get("Description", "") or ""), "qty": float(r["_qty"]), "inv": r["_inv"],
                                     "net": float(r["_net"]), "value": float(r["_val"]), "bl": r["_bl"],
-                                    "suggested": suggested, "hu": _hu_of(r)})
+                                    "suggested": suggested, "hu": _hu_of(r), "hu_net": _hu_net_of(r)})
         if not art or suggested:
             m = missing.setdefault(ref, {"Référence": ref, "Description": str(r.get("Description", "") or "")[:60], "Quantité": 0.0,
                                          "Valeur": 0.0, "Classement": (art["name"] + " (suggéré)") if suggested else "À classer"})
@@ -342,7 +372,7 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
         k = min(max(k, 0), len(arts) - 1)
         arts[k].lines.append({"ref": str(r["Reference"]).strip(), "desc": str(r.get("Description", "") or ""), "qty": float(r["_qty"]),
                               "inv": r["_inv"], "net": float(r["_net"]), "value": float(r["_val"]), "bl": r["_bl"], "suggested": False,
-                              "origin": str(r.get("_origin", "") or ""), "hu": _hu_of(r)})
+                              "origin": str(r.get("_origin", "") or ""), "hu": _hu_of(r), "hu_net": _hu_net_of(r)})
     for a in arts:
         origs = sorted({l["origin"] for l in a.lines if l.get("origin")})
         if not origs:

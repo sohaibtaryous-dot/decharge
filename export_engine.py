@@ -1537,6 +1537,12 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
     st.dataframe(vent.summary_df(rate, cost["coef"] if cost else 1.0), use_container_width=True, hide_index=True,
                  column_config={"Poids net (kg)": st.column_config.NumberColumn(format="%.3f"),
                                 "Valeur devise": st.column_config.NumberColumn(format="%.2f")})
+    uc = vx.unit_check(vent) if kind == "export" else pd.DataFrame()
+    if len(uc):
+        with st.expander(f"Contrôle des poids par unité de manutention ({len(uc)} unité(s))"):
+            st.caption("Poids net de l'unité dans la packing list ↔ somme des poids ventilés de ses références. Écart ≠ 0 : l'unité n'est pas entièrement dans cette ventilation "
+                       "(références absentes ou classées dans un autre article).")
+            st.dataframe(uc, use_container_width=True, hide_index=True)
     t = vent.totals
     st.caption(f"Totaux du dossier : {t['colis']:g} colis · {t['brut']:.3f} kg brut · {t['net']:.3f} kg net · "
                f"{t['quantite']:g} pièces · valeur {t['valeur']:,.2f}".replace(",", " "))
