@@ -311,7 +311,7 @@ def build_ventilation(bl_df: pd.DataFrame, reference: Reference, guess: bool = T
         return vent
     articles: dict[str, Article] = {}
     missing: dict[str, dict] = {}
-    for _, r in df.iterrows():
+    for _ix, r in df.iterrows():
         ref = str(r["Reference"]).strip()
         art = classify(ref, reference)
         suggested = False
@@ -323,7 +323,7 @@ def build_ventilation(bl_df: pd.DataFrame, reference: Reference, guess: bool = T
             articles[key] = Article(art["ngp"], art["rubrique"], art["name"]) if art else Article("", UNCLASSIFIED, UNCLASSIFIED)
         articles[key].lines.append({"ref": ref, "desc": str(r.get("Description", "") or ""), "qty": float(r["_qty"]), "inv": r["_inv"],
                                     "net": float(r["_net"]), "value": float(r["_val"]), "bl": r["_bl"],
-                                    "suggested": suggested, "hu": _hu_of(r), "hu_net": _hu_net_of(r)})
+                                    "suggested": suggested, "hu": _hu_of(r), "hu_net": _hu_net_of(r), "uid": int(_ix)})
         if not art or suggested:
             m = missing.setdefault(ref, {"Référence": ref, "Description": str(r.get("Description", "") or "")[:60], "Quantité": 0.0,
                                          "Valeur": 0.0, "Classement": (art["name"] + " (suggéré)") if suggested else "À classer"})
@@ -364,7 +364,7 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
     assign = manual.get("assign", {})                              # n° facture -> article
     assign_ref = manual.get("assign_ref")                          # référence -> article (prioritaire : choix par référence)
     notes: list[str] = []
-    for _, r in df.iterrows():
+    for _ix, r in df.iterrows():
         if assign_ref is not None:
             k = int(assign_ref.get(norm_ref(r["Reference"]), 1)) - 1
         else:
@@ -372,7 +372,7 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
         k = min(max(k, 0), len(arts) - 1)
         arts[k].lines.append({"ref": str(r["Reference"]).strip(), "desc": str(r.get("Description", "") or ""), "qty": float(r["_qty"]),
                               "inv": r["_inv"], "net": float(r["_net"]), "value": float(r["_val"]), "bl": r["_bl"], "suggested": False,
-                              "origin": str(r.get("_origin", "") or ""), "hu": _hu_of(r), "hu_net": _hu_net_of(r)})
+                              "origin": str(r.get("_origin", "") or ""), "hu": _hu_of(r), "hu_net": _hu_net_of(r), "uid": int(_ix)})
     for a in arts:
         origs = sorted({l["origin"] for l in a.lines if l.get("origin")})
         if not origs:
@@ -399,13 +399,13 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
 
 def apply_ref_net(vent: Ventilation, picks: set, kg_per_ref: float) -> list[str]:
     """Poids connu de certaines lignes de référence (la packing list ne donne que le total de plusieurs pièces) : chaque ligne choisie
-    (identifiée par (n° d'article, n° de ligne), 0-based) reçoit `kg_per_ref` kg. Ce poids est PRIS sur l'unité de manutention de la ligne :
+    (identifiée par son `uid` = position de la ligne dans le tableau BL, stable quel que soit le classement ; à défaut (n° d'article, n° de ligne)) reçoit `kg_per_ref` kg. Ce poids est PRIS sur l'unité de manutention de la ligne :
     le reste du poids de cette unité est réparti sur les autres références de la même unité ; les unités à une seule référence gardent
     leur poids exact et ne bougent pas. Les lignes sans unité connue (pas de packing list) se partagent le reste du poids net du dossier.
     Les références répétées ne sont jamais fusionnées."""
     if kg_per_ref <= 0 or not picks:
         return []
-    lines = [((ai, li), l) for ai, a in enumerate(vent.articles) for li, l in enumerate(a.lines)]
+    lines = [(l.get("uid", (ai, li)), l) for ai, a in enumerate(vent.articles) for li, l in enumerate(a.lines)]
     chosen = [l for k, l in lines if k in picks]
     if not chosen:
         return []

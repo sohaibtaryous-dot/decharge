@@ -1518,11 +1518,13 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
     fix_sig = None
     if fixbox is not None and vent.articles:
         with fixbox:
-            opts: dict = {}                                           # une entrée par LIGNE (les références répétées ne sont pas fusionnées)
+            opts: dict = {}                                           # une entrée par LIGNE (les références répétées ne sont pas fusionnées) ; clé = position dans le BL : le choix survit au changement de classement
             for ai, art in enumerate(vent.articles):
                 for li, l in enumerate(art.lines):
-                    opts[(ai, li)] = (f"L{len(opts) + 1} · {str(l['ref']).strip()} — {(l.get('desc') or '')[:30]} · qté {l['qty']:g} · "
-                                      f"facture {l.get('inv', '')} · article {ai + 1}" + (f" · unité {l['hu']}" if l.get("hu") else ""))      # n° de ligne : libellés toujours distincts
+                    uid = l.get("uid", (ai, li))
+                    opts[uid] = (f"L{uid + 1 if isinstance(uid, int) else len(opts) + 1} · {str(l['ref']).strip()} — {(l.get('desc') or '')[:30]} · qté {l['qty']:g} · "
+                                 f"facture {l.get('inv', '')} · article {ai + 1}" + (f" · unité {l['hu']}" if l.get("hu") else ""))
+            opts = dict(sorted(opts.items(), key=lambda kv: (0, kv[0], 0) if isinstance(kv[0], int) else (1, kv[0][0], kv[0][1])))
             fa, fb = st.columns([2, 1])
             picks = fa.multiselect("Références dont je connais le poids", list(opts), format_func=lambda k: opts[k], key=f"{P}_fixrefs",
                                    placeholder="Choisir les références…",
