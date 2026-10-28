@@ -206,6 +206,12 @@ class Ventilation:
         } for i, a in enumerate(self.articles, start=1)])
 
 
+def _hu_of(r) -> str | None:
+    """Unité de manutention de la ligne (colonne `_hu` posée par pl_weights.attach), ou None."""
+    v = r.get("_hu") if hasattr(r, "get") else None
+    return None if v is None or (isinstance(v, float) and v != v) else str(v)
+
+
 def _apply_hu_weights(df: pd.DataFrame) -> list[str]:
     """Poids net lus dans la packing list (colonnes `_hu` / `_hu_net`, voir pl_weights) : une référence seule dans son unité de manutention
     garde son poids exact ; les références d'une même unité se partagent le poids de l'unité (au prorata de la valeur) ; seules les lignes
@@ -287,7 +293,7 @@ def build_ventilation(bl_df: pd.DataFrame, reference: Reference, guess: bool = T
             articles[key] = Article(art["ngp"], art["rubrique"], art["name"]) if art else Article("", UNCLASSIFIED, UNCLASSIFIED)
         articles[key].lines.append({"ref": ref, "desc": str(r.get("Description", "") or ""), "qty": float(r["_qty"]), "inv": r["_inv"],
                                     "net": float(r["_net"]), "value": float(r["_val"]), "bl": r["_bl"],
-                                    "suggested": suggested})
+                                    "suggested": suggested, "hu": _hu_of(r)})
         if not art or suggested:
             m = missing.setdefault(ref, {"Référence": ref, "Description": str(r.get("Description", "") or "")[:60], "Quantité": 0.0,
                                          "Valeur": 0.0, "Classement": (art["name"] + " (suggéré)") if suggested else "À classer"})
@@ -336,7 +342,7 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
         k = min(max(k, 0), len(arts) - 1)
         arts[k].lines.append({"ref": str(r["Reference"]).strip(), "desc": str(r.get("Description", "") or ""), "qty": float(r["_qty"]),
                               "inv": r["_inv"], "net": float(r["_net"]), "value": float(r["_val"]), "bl": r["_bl"], "suggested": False,
-                              "origin": str(r.get("_origin", "") or "")})
+                              "origin": str(r.get("_origin", "") or ""), "hu": _hu_of(r)})
     for a in arts:
         origs = sorted({l["origin"] for l in a.lines if l.get("origin")})
         if not origs:
@@ -363,34 +369,48 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
 
 def apply_ref_net(vent: Ventilation, picks: set, kg_per_ref: float) -> list[str]:
     """Poids connu de certaines lignes de référence (la packing list ne donne que le total de plusieurs pièces) : chaque ligne choisie
-    (identifiée par (n° d'article, n° de ligne), 0-based) reçoit `kg_per_ref` kg ; le reste du poids net du dossier est réparti
-    sur toutes les autres lignes (tous articles). Les références répétées ne sont jamais fusionnées."""
+    (identifiée par (n° d'article, n° de ligne), 0-based) reçoit `kg_per_ref` kg. Ce poids est PRIS sur l'unité de manutention de la ligne :
+    le reste du poids de cette unité est réparti sur les autres références de la même unité ; les unités à une seule référence gardent
+    leur poids exact et ne bougent pas. Les lignes sans unité connue (pas de packing list) se partagent le reste du poids net du dossier.
+    Les références répétées ne sont jamais fusionnées."""
     if kg_per_ref <= 0 or not picks:
         return []
-    chosen = [l for ai, a in enumerate(vent.articles) for li, l in enumerate(a.lines) if (ai, li) in picks]
-    others = [l for ai, a in enumerate(vent.articles) for li, l in enumerate(a.lines) if (ai, li) not in picks]
+    lines = [((ai, li), l) for ai, a in enumerate(vent.articles) for li, l in enumerate(a.lines)]
+    chosen = [l for k, l in lines if k in picks]
     if not chosen:
         return []
-    total = float(vent.totals.get("net", 0.0))
-    fixed = kg_per_ref * len(chosen)
-    for l in chosen:
-        l["net"] = kg_per_ref
-    notes = [f"Poids net imposé : {kg_per_ref:g} kg × {len(chosen)} ligne(s) de référence choisie(s) = {fixed:g} kg."]
-    rest = total - fixed
-    if rest < -0.0005:
-        notes.append(f"⚠ Le poids imposé ({fixed:g} kg) dépasse le poids net du dossier ({total:g} kg) : vérifiez le poids saisi.")
-        rest = 0.0
-    if others:
-        base = [abs(l["net"]) for l in others]
-        if not sum(base):
-            base = [abs(l["value"]) for l in others]
-        if not sum(base):
-            base = [1.0] * len(others)
-        for l, x in zip(others, base):
-            l["net"] = rest * x / sum(base)
-        notes.append(f"Poids net restant ({rest:g} kg) réparti sur les {len(others)} autre(s) ligne(s) (au prorata de leur poids calculé).")
-    else:
-        notes.append(f"⚠ Toutes les lignes ont un poids imposé : {fixed:g} kg pour un poids net de dossier de {total:g} kg.")
+    pools: dict = {}
+    for k, l in lines:
+        pools.setdefault((str(l.get("bl", "")), str(l["hu"])) if l.get("hu") else None, []).append((k, l))
+    known_sum = sum(float(l["net"]) for key, ms in pools.items() if key for _, l in ms)
+    notes = [f"Poids net imposé : {kg_per_ref:g} kg × {len(chosen)} ligne(s) de référence choisie(s) = {kg_per_ref * len(chosen):g} kg."]
+    for key, ms in pools.items():
+        ch = [l for k, l in ms if k in picks]
+        if not ch:
+            continue
+        oth = [l for k, l in ms if k not in picks]
+        if key:
+            pool_total, label = sum(float(l["net"]) for _, l in ms), f"Unité {key[1]}"
+        else:
+            pool_total, label = float(vent.totals.get("net", 0.0)) - known_sum, "Lignes sans unité de manutention" if known_sum else "Dossier"
+        fixed = kg_per_ref * len(ch)
+        for l in ch:
+            l["net"] = kg_per_ref
+        rest = pool_total - fixed
+        if rest < -0.0005:
+            notes.append(f"⚠ {label} : le poids imposé ({fixed:g} kg) dépasse le poids disponible ({pool_total:g} kg) : vérifiez le poids saisi.")
+            rest = 0.0
+        if oth:
+            base = [abs(float(l["net"])) for l in oth]
+            if not sum(base):
+                base = [abs(float(l.get("value", 0))) for l in oth]
+            if not sum(base):
+                base = [1.0] * len(oth)
+            for l, x in zip(oth, base):
+                l["net"] = rest * x / sum(base)
+            notes.append(f"{label} : {pool_total:g} kg − {len(ch)} × {kg_per_ref:g} kg = {rest:g} kg répartis sur les {len(oth)} autre(s) référence(s) de ce groupe.")
+        elif abs(rest) > 0.005 * max(pool_total, 1.0):
+            notes.append(f"⚠ {label} : toutes les références ont un poids imposé ({fixed:g} kg) mais le poids disponible est de {pool_total:g} kg.")
     return notes
 
 

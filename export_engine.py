@@ -1522,12 +1522,13 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
             for ai, art in enumerate(vent.articles):
                 for li, l in enumerate(art.lines):
                     opts[(ai, li)] = (f"L{len(opts) + 1} · {str(l['ref']).strip()} — {(l.get('desc') or '')[:30]} · qté {l['qty']:g} · "
-                                      f"facture {l.get('inv', '')} · article {ai + 1}")      # n° de ligne : libellés toujours distincts
+                                      f"facture {l.get('inv', '')} · article {ai + 1}" + (f" · unité {l['hu']}" if l.get("hu") else ""))      # n° de ligne : libellés toujours distincts
             fa, fb = st.columns([2, 1])
             picks = fa.multiselect("Références dont je connais le poids", list(opts), format_func=lambda k: opts[k], key=f"{P}_fixrefs",
                                    placeholder="Choisir les références…",
                                    help="Quand la packing list ne donne que le total de plusieurs pièces : choisissez les références dont vous connaissez le poids. "
-                                        "Chacune reçoit le poids saisi (par référence) ; le reste du poids net du dossier est réparti sur les autres références.")
+                                        "Chacune reçoit le poids saisi (par référence), pris sur le poids de son unité de manutention : le reste de l'unité est réparti sur ses autres références ; "
+                                        "une unité à une seule référence garde son poids exact.")
             unit = fb.number_input("Poids par référence (kg)", min_value=0.0, value=0.0, step=0.5, format="%.3f", key=f"{P}_fixw")
         if unit > 0 and picks:
             vent.notes = vent.notes + vx.apply_ref_net(vent, set(picks), unit)
