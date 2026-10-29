@@ -127,7 +127,10 @@ def build_xlsx(tables: list[dict], sep: str = "") -> bytes:
 
 
 def render():
-    st.markdown("### 📋 DÉCHARGE")
+    import ui
+    ui.hero_3d(None, badge="TIMAR TANGER · DÉCHARGE", title="Décharge", highlight="tableau depuis capture",
+               desc="Collez la capture du tableau reçu du client, ou déposez la fiche d'imputation de BADR : le site relit chaque ligne "
+                    "et vous rend le fichier Excel.")
     t1, t2, t3 = st.tabs(["Tableau reçu en capture (image)", "Fiche d'imputation (PDF de BADR)", "Mémoire des lettres"])
     with t1:
         _render_capture()

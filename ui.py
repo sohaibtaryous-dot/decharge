@@ -404,8 +404,10 @@ section[data-testid="stSidebar"] * { color:#0F172A; }
 '''
 
 # Thèmes : on remplace la palette bleue d'origine (couleurs hex / rgb) par celle du thème choisi
+CLASSIC = "Bleu Port (classique)"
 THEMES = {
     "Bleu Port": None,
+    CLASSIC: None,
     "Émeraude": {"hex": {"3B82F6": "10B981", "2563EB": "059669", "1D4ED8": "047857", "38BDF8": "34D399", "93C5FD": "6EE7B7",
                          "60A5FA": "34D399", "1E3A8A": "064E3B", "070D1C": "04100C", "0A1226": "071A14", "08101F": "050E0B",
                          "0C1426": "07150F", "0A1020": "06120D", "0F1B33": "0B241B", "0C1528": "08201A", "0B1A2C": "08221A"},
@@ -450,6 +452,137 @@ THEMES = {
 }
 
 
+# =============================================================================
+# DESIGN PROFESSIONNEL (thème par défaut) — CSS seul : aucune animation permanente, aucune iframe
+# =============================================================================
+
+PRO_CSS = """
+<style>
+/* ---------- Socle ---------- */
+.stApp { background: linear-gradient(180deg, rgba(59,130,246,.05), transparent 260px), var(--bg) !important; }
+.block-container { padding-top: 2.4rem !important; padding-bottom: 2.5rem; max-width: 1320px; }
+[data-testid="stToolbar"], [data-testid="stAppDeployButton"], .stAppDeployButton, .stDeployButton,
+[data-testid="stMainMenu"], [data-testid="stStatusWidget"] { display: none !important; }
+header[data-testid="stHeader"] { background: transparent !important; height: 2.4rem; }
+.stApp, .stMarkdown, .stMarkdown p, .stMarkdown li { color: var(--ink); }
+::selection { background: rgba(59,130,246,.35); }
+* { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.28) transparent; }
+div[class*="st-key-card"] { animation: none !important; }
+
+/* ---------- En-tête de page compact ---------- */
+.ph { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;
+  padding: 0 0 1.1rem; margin: 0 0 1.3rem; border-bottom: 1px solid var(--brd); }
+.ph-crumb { display: flex; align-items: center; gap: .45rem; font-size: .7rem; font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink3); margin-bottom: .45rem; }
+.ph-crumb i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.18); }
+.ph h1 { font-size: 1.65rem !important; line-height: 1.2 !important; font-weight: 750 !important; letter-spacing: -.02em;
+  margin: 0 !important; padding: 0 !important; }
+.ph h1 a, .ph [data-testid="stHeaderActionElements"] { display: none !important; }
+.ph h1, .ph h1 * { color: var(--ink) !important; }
+.ph h1 em.hl { font-style: normal; color: #93C5FD !important; }
+.ph p { color: var(--ink2) !important; font-size: .9rem; line-height: 1.5; max-width: 760px; margin: .4rem 0 0 !important; }
+.ph-stats { display: flex; gap: .5rem; flex-wrap: wrap; }
+.ph-stat { min-width: 92px; padding: .5rem .8rem; border-radius: 10px; border: 1px solid var(--brd); background: var(--surface); }
+.ph-stat b { display: block; color: var(--ink); font-size: .98rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ph-stat span { display: block; color: var(--ink3); font-size: .66rem; letter-spacing: .08em; text-transform: uppercase; margin-top: .1rem; }
+.ph-ai { display: inline-flex; align-items: center; gap: .35rem; font-size: .72rem; font-weight: 600; color: #BFDBFE;
+  padding: .28rem .6rem; border-radius: 999px; border: 1px solid rgba(96,165,250,.35); background: rgba(59,130,246,.10); margin-left: .5rem; }
+
+/* ---------- Barre latérale ---------- */
+section[data-testid="stSidebar"] { border-right: 1px solid var(--brd) !important; }
+section[data-testid="stSidebar"] .block-container, section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding-top: .4rem; }
+.side-user { display: flex; align-items: center; gap: .7rem; padding: .65rem .7rem; border-radius: 12px; border: 1px solid var(--brd);
+  background: var(--surface); margin: .2rem 0 .6rem; }
+.side-user .av { width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .8rem;
+  color: #fff; background: linear-gradient(135deg, #2563EB, #38BDF8); }
+.side-user .who { min-width: 0; }
+.side-user .who b { display: block; color: var(--ink); font-size: .82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-user .who span { display: inline-flex; align-items: center; gap: .3rem; color: var(--ink3); font-size: .7rem; }
+.side-user .who span i { width: 7px; height: 7px; border-radius: 50%; background: #22C55E; }
+div.st-key-module [data-testid="stRadioOption"], div.st-key-module [role="radiogroup"] > label {
+  padding: .55rem .7rem !important; border-radius: 9px !important; border: 1px solid transparent !important; background: transparent !important; }
+div.st-key-module [data-testid="stRadioOption"]:hover, div.st-key-module [role="radiogroup"] > label:hover { background: rgba(148,163,184,.08) !important; }
+div.st-key-module [data-testid="stRadioOption"][data-selected="true"], div.st-key-module [role="radiogroup"] > label:has(input:checked) {
+  background: rgba(59,130,246,.13) !important; border-color: rgba(59,130,246,.35) !important; box-shadow: inset 3px 0 0 var(--accent) !important; }
+div.st-key-module [data-testid="stRadioOption"] p { font-weight: 600 !important; font-size: .83rem !important; color: var(--ink2) !important; }
+div.st-key-module [data-testid="stRadioOption"][data-selected="true"] p, div.st-key-module label:has(input:checked) p { color: var(--ink) !important; }
+div.st-key-module [role="radiogroup"] { gap: .15rem !important; }
+
+/* ---------- Libellés, aides, légendes ---------- */
+[data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label { color: var(--ink2) !important; font-weight: 500 !important; font-size: .84rem !important; }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: var(--ink3) !important; }
+.stRadio [role="radiogroup"] label p, .stCheckbox label p { color: var(--ink) !important; }
+
+/* ---------- Champs de saisie (identiques quel que soit le thème clair / sombre du poste) ---------- */
+[data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"], [data-baseweb="select"] > div {
+  background: var(--surface2) !important; border-color: var(--brd) !important; border-radius: 10px !important; }
+[data-baseweb="input"]:focus-within, [data-baseweb="textarea"]:focus-within, [data-baseweb="select"] > div:focus-within {
+  border-color: rgba(59,130,246,.75) !important; box-shadow: 0 0 0 3px rgba(59,130,246,.18) !important; }
+[data-baseweb="input"] input, [data-baseweb="base-input"] input, [data-baseweb="textarea"] textarea, [data-baseweb="select"] div {
+  color: var(--ink) !important; -webkit-text-fill-color: var(--ink); }
+[data-baseweb="input"] input::placeholder, [data-baseweb="textarea"] textarea::placeholder { color: var(--ink3) !important; -webkit-text-fill-color: var(--ink3); }
+[data-testid="stNumberInputContainer"] { background: var(--surface2) !important; border-color: var(--brd) !important; border-radius: 10px !important; }
+[data-testid="stNumberInput"] button { background: transparent !important; color: var(--ink2) !important; border: none !important; }
+[data-testid="stNumberInput"] button:hover { color: var(--ink) !important; background: rgba(148,163,184,.10) !important; }
+[data-baseweb="popover"] ul, [data-baseweb="menu"], [role="listbox"] { background: var(--surface2) !important; border: 1px solid var(--brd) !important; border-radius: 10px !important; }
+[data-baseweb="popover"] li, [role="option"] { color: var(--ink) !important; }
+[data-baseweb="popover"] li:hover, [role="option"][aria-selected="true"], [role="option"]:hover { background: rgba(59,130,246,.14) !important; }
+[data-baseweb="tag"] { background: rgba(59,130,246,.16) !important; border: 1px solid rgba(59,130,246,.35) !important; border-radius: 7px !important; }
+[data-baseweb="tag"] span, [data-baseweb="tag"] svg { color: #DBEAFE !important; fill: #DBEAFE !important; }
+
+/* ---------- Dépôt de fichiers ---------- */
+[data-testid="stFileUploaderDropzone"] { background: rgba(148,163,184,.04) !important; border: 1.5px dashed rgba(148,163,184,.28) !important; border-radius: 12px !important; }
+[data-testid="stFileUploaderDropzone"]:hover { border-color: rgba(59,130,246,.7) !important; background: rgba(59,130,246,.06) !important; }
+[data-testid="stFileUploaderDropzone"] button { background: var(--surface2) !important; color: var(--ink) !important; border: 1px solid var(--brd) !important; border-radius: 9px !important; }
+[data-testid="stFileUploaderDropzoneInstructions"] small, [data-testid="stFileUploaderDropzoneInstructions"] span { color: var(--ink3) !important; }
+[data-testid="stFileUploaderFile"] { border-radius: 9px; }
+
+/* ---------- Boutons ---------- */
+.stButton > button[kind="secondary"], .stDownloadButton > button[kind="secondary"], [data-testid^="stBaseButton-secondary"] {
+  background: var(--surface) !important; border: 1px solid var(--brd) !important; color: var(--ink) !important; border-radius: 10px !important; }
+.stButton > button[kind="secondary"]:hover, [data-testid^="stBaseButton-secondary"]:hover { border-color: rgba(59,130,246,.55) !important; background: rgba(59,130,246,.07) !important; }
+.stButton > button[kind="primary"]:hover, .stDownloadButton > button[kind="primary"]:hover { transform: none !important; }
+
+/* ---------- Cartes, onglets, tableaux, expanders, alertes ---------- */
+div[class*="st-key-card"] { border-radius: 14px !important; box-shadow: 0 1px 0 rgba(255,255,255,.025) inset, 0 10px 24px -18px rgba(0,0,0,.7) !important; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px !important; }
+.stTabs [role="tab"][aria-selected="true"] { background: transparent !important; }
+[data-testid="stExpander"] details summary p { font-weight: 600; color: var(--ink) !important; }
+[data-testid="stExpander"] details summary:hover p { color: #BFDBFE !important; }
+[data-testid="stAlert"] { border-radius: 12px !important; }
+[data-testid="stMetric"] { background: var(--surface); border: 1px solid var(--brd); border-radius: 12px; padding: .7rem .9rem; }
+[data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
+.foot { opacity: .85; }
+@media (max-width: 760px) { .ph { align-items: flex-start; } .ph h1 { font-size: 1.35rem !important; } .block-container { padding-top: 1.6rem !important; } }
+</style>
+"""
+
+PRO_DARK_VARS = "<style>:root { --ink3:#8792AB; }</style>"      # légendes plus lisibles (thèmes sombres uniquement)
+
+
+def _pro() -> bool:
+    """Design professionnel (défaut) ; « Bleu Port (classique) » garde l'ancien habillage avec la grande bannière animée."""
+    return st.session_state.get("theme", "Bleu Port") != CLASSIC
+
+
+def page_header(stats: dict | None, badge: str, title: str, highlight: str, desc: str, ai_label: str = ""):
+    """En-tête compact : fil d'Ariane, titre, description et indicateurs (HTML natif, aucune iframe)."""
+    chips = "".join(f'<div class="ph-stat"><b>{html.escape(str(v))}</b><span>{html.escape(k)}</span></div>' for k, v in (stats or {}).items())
+    ai = f'<span class="ph-ai">{icon("sparkles", 12)}{html.escape(ai_label)}</span>' if ai_label else ""
+    st.markdown(skin(f'<div class="ph"><div class="ph-l"><div class="ph-crumb"><i></i>{html.escape(badge)}{ai}</div>'
+                     f'<h1>{html.escape(title)} <em class="hl">{html.escape(highlight)}</em></h1><p>{html.escape(desc)}</p></div>'
+                     f'<div class="ph-stats">{chips}</div></div>'), unsafe_allow_html=True)
+
+
+def sidebar_user(email: str, role: str):
+    """Carte utilisateur de la barre latérale : initiales, e-mail, rôle."""
+    name = email.split("@")[0]
+    parts = [p for p in name.replace("_", ".").replace("-", ".").split(".") if p]
+    ini = ((parts[0][:1] + (parts[1][:1] if len(parts) > 1 else parts[0][1:2])) if parts else "?").upper()
+    st.markdown(f'<div class="side-user"><div class="av">{html.escape(ini)}</div><div class="who"><b title="{html.escape(email)}">{html.escape(email)}</b>'
+                f'<span><i></i>{html.escape(role)}</span></div></div>', unsafe_allow_html=True)
+
+
 def skin(text: str, theme: str | None = None) -> str:
     """Applique le thème choisi (st.session_state['theme'] par défaut) à un bloc CSS / HTML."""
     theme = theme or st.session_state.get("theme", "Bleu Port")
@@ -491,10 +624,14 @@ FX_JS = """
 
 
 def inject_css():
-    if st.session_state.get("theme", "Bleu Port") == "Bleu Port":      # design d'origine, sans fond animé ni effets
+    theme = st.session_state.get("theme", "Bleu Port")
+    if theme in ("Bleu Port", CLASSIC):                                 # sans fond animé ni effets
         st.markdown(GLOBAL_CSS.split("/* ===== Fond professionnel")[0] + "</style>", unsafe_allow_html=True)
+        if theme == "Bleu Port":
+            st.markdown(PRO_CSS + PRO_DARK_VARS, unsafe_allow_html=True)
         return
     st.markdown(skin(GLOBAL_CSS), unsafe_allow_html=True)
+    st.markdown(skin(PRO_CSS) + ("" if THEMES[theme].get("css") == "LIGHT" else PRO_DARK_VARS), unsafe_allow_html=True)
     components.html(f"<script>{FX_JS}</script>", height=0)
 
 
@@ -632,7 +769,10 @@ def hero_3d(stats: dict | None = None, badge: str = "TIMAR TANGER · DÉDOUANEME
                         "chaque ligne contrôlée et rapprochée de votre référentiel NGP, classeur Excel prêt pour la déclaration.",
             ai_label: str = ""):
     """En-tête façon site de transitaire : bannière arrondie (vidéo static/hero.mp4 si présente, sinon diaporama animé),
-    puis titre centré et indicateurs."""
+    puis titre centré et indicateurs. Design professionnel (défaut) : en-tête compact sans bannière."""
+    if _pro():
+        page_header(stats, badge, title, highlight, desc, ai_label)
+        return
     video = _hero_video()
     chips = "".join(f'<div class="stat"><b>{html.escape(str(v))}</b><span>{html.escape(k)}</span></div>'
                     for k, v in (stats or {}).items())

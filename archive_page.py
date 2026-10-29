@@ -16,9 +16,11 @@ MIME = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.she
 
 def render(user: dict):
     admin = user.get("role") == "admin"
-    st.markdown("### 📁 ARCHIVE — dossiers générés")
-    st.caption("Chaque dossier traité (IMPORT, EXPORT, DÉCHARGE) est gardé ici automatiquement avec ses fichiers Excel. Cherchez par **n° de facture, BL, DUM, client…**."
-               + (" Vous voyez les dossiers de **tous** les utilisateurs." if admin else " Vous ne voyez que vos dossiers."))
+    import ui
+    ui.hero_3d(None, badge="TIMAR TANGER · ARCHIVE", title="Archive", highlight="dossiers générés",
+               desc="Chaque dossier traité (IMPORT, EXPORT, DÉCHARGE) est gardé ici automatiquement avec ses fichiers Excel. "
+                    "Cherchez par n° de facture, BL, DUM, client…"
+                    + (" Vous voyez les dossiers de tous les utilisateurs." if admin else " Vous ne voyez que vos dossiers."))
     c1, c2, c3 = st.columns([2.2, 1, 1.4])
     q = c1.text_input("Rechercher", placeholder="Ex. FCM3625 · 803879400 · ALSTOM VALENCIENNES · 0003729", key="arch_q")
     mod = c2.selectbox("Module", MODULES, key="arch_mod")

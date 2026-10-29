@@ -704,8 +704,11 @@ def logout():
 
 def sidebar_account(user: dict):
     ui.sidebar_cap("Compte", "shield")
-    ui.sidebar_pill(ui.GOOD, f"<b>{user['email']}</b>")
-    st.caption("Administrateur" if user["role"] == "admin" else "Utilisateur")
+    if ui._pro():
+        ui.sidebar_user(user["email"], "Administrateur" if user["role"] == "admin" else "Utilisateur")
+    else:
+        ui.sidebar_pill(ui.GOOD, f"<b>{user['email']}</b>")
+        st.caption("Administrateur" if user["role"] == "admin" else "Utilisateur")
     if st.button("Se déconnecter", use_container_width=True, icon=":material/logout:", key="btn_logout"):
         logout()
     account_password_box(user)
@@ -836,8 +839,9 @@ def render_auth():
                     "activés par l'administrateur.")
     if maintenance_on():
         ui.status_banner("warn", "🟠", "Site en maintenance", maintenance_message() + " (seul l'administrateur peut se connecter.)")
-    ui.section("Nos formules", "⚡")
-    plans_card()
+    if not ui._pro():                                    # design classique : formules avant la connexion
+        ui.section("Nos formules", "⚡")
+        plans_card()
     import ui_login_lamp
     ui_login_lamp.inject()
     _, mid, _ = st.columns([0.6, 2, 0.6])
@@ -861,6 +865,9 @@ def render_auth():
                 else:
                     st.markdown('<div class="lamp-form"></div>', unsafe_allow_html=True)
                     _auth_forms()
+    if ui._pro():                                        # design professionnel : la connexion d'abord, les formules ensuite
+        ui.section("Nos formules", "⚡")
+        plans_card()
 
 
 def _auth_forms():

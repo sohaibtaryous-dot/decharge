@@ -3231,7 +3231,7 @@ def sidebar_ai():
 
 def main():
     st.set_page_config(page_title="TIMAR · Ventilation Groupage Alstom Fez", page_icon="🚛", layout="wide",
-                       initial_sidebar_state="expanded")
+                       initial_sidebar_state="auto")      # « auto » : ouverte sur ordinateur, repliée sur téléphone
     if "theme" not in st.session_state:
         st.session_state["theme"] = "Bleu Port"
     ui.inject_css()
@@ -3276,11 +3276,11 @@ def main():
         views.sidebar_account(user)
         st.selectbox("🎨 Thème", list(ui.THEMES), key="theme", help="Change les couleurs de l'application.")
         ui.sidebar_cap("Module", "layers")
-        modules = [":material/move_to_inbox: IMPORT — Ventilation groupage", ":material/outbox: EXPORT — BL & Factures"]
-        modules += [":material/receipt_long: DÉCHARGE — Tableau depuis capture"]
-        modules += [":material/inventory_2: ARCHIVE — Dossiers & recherche"]
-        modules += [":material/admin_panel_settings: ADMIN — Gestion des Accès & Dispatch"] if is_admin else \
-                   [":material/folder_open: MES FICHIERS — Dossiers reçus"]
+        modules = [":material/move_to_inbox: IMPORT · Ventilation groupage", ":material/outbox: EXPORT · BL & Factures"]
+        modules += [":material/receipt_long: DÉCHARGE · Tableau depuis capture"]
+        modules += [":material/inventory_2: ARCHIVE · Dossiers & recherche"]
+        modules += [":material/admin_panel_settings: ADMIN · Accès & Dispatch"] if is_admin else \
+                   [":material/folder_open: MES FICHIERS · Dossiers reçus"]
         module = st.radio("Module", modules, key="module")
         is_admin_panel = "ADMIN" in module
         is_files = "MES FICHIERS" in module
