@@ -428,7 +428,9 @@ def css(theme: str) -> str:
     body = _design_css(theme)
     a = anims()
     need_art = bool(spec(theme)) or "G" in a or "H" in a
-    out = (BASE_CSS if (body or a) else "") + "\n" + (ART_CSS if need_art else "") + "\n" + body + "\n" + _anim_css(a)
+    imports = "\n".join(l for l in body.splitlines() if l.startswith("@import"))          # @import doit venir en tête de feuille
+    body = "\n".join(l for l in body.splitlines() if not l.startswith("@import"))
+    out = imports + "\n" + (BASE_CSS if (body or a) else "") + "\n" + (ART_CSS if need_art else "") + "\n" + body + "\n" + _anim_css(a)
     return f"<style>{out}</style>" if out.strip() else ""
 
 
@@ -508,7 +510,22 @@ def header_art(theme: str, stats: dict | None, badge: str, title: str) -> str:
         parts.append(f'<div class="ph-art">{_SHIP}</div>')
     if not parts:
         return ""
-    return "".join(parts) + ('<div class="ph-veil"></div>' if (scene or art in ("port", "aurora", "boxes", "routes", "neon")) else "")
+    out = "".join(parts) + ('<div class="ph-veil"></div>' if (scene or art in ("port", "aurora", "boxes", "routes", "neon")) else "")
+    return _pin(out)
+
+
+_PIN = "position:absolute;top:0;bottom:0;overflow:hidden;pointer-events:none;"
+
+
+def _pin(markup: str) -> str:
+    """Décor toujours hors du flux, même si la feuille de style du design n'est pas (encore) appliquée par le navigateur :
+    sinon le <canvas> agrandit l'en-tête, qui agrandit le <canvas>… et l'en-tête devient immense."""
+    markup = markup.replace('<div class="ph-art right" style="', f'<div class="ph-art right" style="{_PIN}')
+    markup = markup.replace('<div class="ph-art" style="', f'<div class="ph-art" style="{_PIN}left:0;right:0;')
+    markup = markup.replace('<div class="ph-art right">', f'<div class="ph-art right" style="{_PIN}">')
+    markup = markup.replace('<div class="ph-art">', f'<div class="ph-art" style="{_PIN}left:0;right:0">')
+    markup = markup.replace('<div class="ph-veil">', f'<div class="ph-veil" style="{_PIN}left:0;right:0">')
+    return markup.replace('<div class="scene-slot ', '<div style="position:absolute;top:0;right:0;bottom:0;left:0;overflow:hidden" class="scene-slot ')
 
 
 def login_background(theme: str):
@@ -516,7 +533,8 @@ def login_background(theme: str):
     s = spec(theme)
     if s and s[6]:
         st.session_state["_tz_bg_login"] = True
-        st.markdown(f'<div class="scene-slot scene-bg scene-{s[6]}"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="scene-slot scene-bg scene-{s[6]}" style="position:fixed;top:0;right:0;bottom:0;left:0;z-index:-1;pointer-events:none"></div>',
+                    unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -861,8 +879,9 @@ function mount() {
     slot.setAttribute("data-m", name);
     var s = S[name], o = { slot: slot, s: s, name: name, vis: true, w: 0, h: 0, mx: -1e4, my: -1e4 };
     o.static = RM || (cfg.heavy.indexOf(name) >= 0 && W.innerWidth < 760);
-    if (!s.noCanvas) { o.cv = doc.createElement("canvas"); slot.prepend(o.cv); if (!s.gl) o.ctx = o.cv.getContext("2d"); }
-    function rs() { var r = slot.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return; o.w = r.width; o.h = r.height;
+    if (!s.noCanvas) { o.cv = doc.createElement("canvas"); o.cv.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;display:block"; slot.prepend(o.cv); if (!s.gl) o.ctx = o.cv.getContext("2d"); }
+    var bg = slot.classList.contains("scene-bg");
+    function rs() { var r = slot.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return; o.w = Math.min(r.width, bg ? 4000 : 2600); o.h = Math.min(r.height, bg ? 3000 : 520);
       if (o.cv) { var dpr = Math.min(s.dprCap || 1.5, W.devicePixelRatio || 1); o.cv.width = Math.round(o.w * dpr); o.cv.height = Math.round(o.h * dpr); if (o.ctx) o.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
       if (s.init) s.init(o); if (o.static) s.frame(o, 7.3, 0); }
     o.ro = new W.ResizeObserver(rs); o.ro.observe(slot);

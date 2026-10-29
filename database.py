@@ -212,6 +212,23 @@ def admin_exists() -> bool:
         return con.execute("SELECT 1 FROM users WHERE role='admin' LIMIT 1").fetchone() is not None
 
 
+def verify_admin_password(password: str) -> bool:
+    """Vérifie ce mot de passe contre n'importe quel compte Admin (sans connaître son e-mail) — ex. pour débloquer un
+    réglage réservé à l'Admin sans passer par la connexion complète. Même limite anti-brute-force que authenticate()."""
+    with connect() as con:
+        if _recent_fails(con, "__admin_unlock__") >= MAX_FAILS:
+            return False
+        rows = con.execute("SELECT password_hash FROM users WHERE role='admin'").fetchall()
+        ok = bool(password) and any(verify_password(password, r["password_hash"]) for r in rows)
+        if not rows:
+            verify_password(password or "", hash_password("dummy"))       # temps de réponse constant
+        if not ok:
+            con.execute("INSERT INTO login_attempts (email, ts) VALUES (?, ?)", ("__admin_unlock__", time.time()))
+        else:
+            con.execute("DELETE FROM login_attempts WHERE email=?", ("__admin_unlock__",))
+    return ok
+
+
 def create_user(email: str, password: str, role: str = "user", status: str = "pending",
                 verified: bool = True) -> tuple[bool, str]:
     """Crée un compte. Inscription publique : role='user', status='pending'. Retourne (ok, message)."""

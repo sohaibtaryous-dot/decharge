@@ -577,7 +577,8 @@ def page_header(stats: dict | None, badge: str, title: str, highlight: str, desc
     chips = "".join(f'<div class="ph-stat"><b>{html.escape(str(v))}</b><span>{html.escape(k)}</span></div>' for k, v in (stats or {}).items())
     ai = f'<span class="ph-ai">{icon("sparkles", 12)}{html.escape(ai_label)}</span>' if ai_label else ""
     art = ui_designs.header_art(st.session_state.get("theme", "Bleu Port"), stats, badge, title)
-    st.markdown(skin(f'<div class="ph{" has-art" if art else ""}">{art}<div class="ph-l"><div class="ph-crumb"><i></i>{html.escape(badge)}{ai}</div>'
+    pin = ' style="position:relative;overflow:hidden"' if art else ""             # le décor ne peut jamais agrandir l'en-tête
+    st.markdown(skin(f'<div class="ph{" has-art" if art else ""}"{pin}>{art}<div class="ph-l"><div class="ph-crumb"><i></i>{html.escape(badge)}{ai}</div>'
                      f'<h1>{html.escape(title)} <em class="hl">{html.escape(highlight)}</em></h1><p>{html.escape(desc)}</p></div>'
                      f'<div class="ph-stats">{chips}</div></div>'), unsafe_allow_html=True)
 

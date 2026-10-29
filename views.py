@@ -694,14 +694,67 @@ def site_design() -> tuple[str, list[str]]:
     return (t if t in ui.THEMES else "Bleu Port"), a
 
 
-def resolve_design():
-    """Design affiché dans cette session : l'essai personnel s'il existe, sinon le design du site."""
+def _preview_cookie() -> dict | None:
+    """Essai personnel gardé sur cet appareil (cookie « timar_pv ») : survit à un rechargement complet de la page,
+    même sans être connecté — contrairement à st.session_state, réinitialisé à chaque nouvelle connexion WebSocket."""
+    import json
+    from urllib.parse import unquote
     import ui_designs
+    try:
+        raw = st.context.cookies.get("timar_pv")
+        if not raw:
+            return None
+        d = json.loads(unquote(raw))
+        if d.get("theme") not in ui.THEMES:
+            return None
+        return {"theme": d["theme"], "anims": [x for x in d.get("anims", []) if x in ui_designs.ANIMS]}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _set_preview_cookie(theme: str, anims: list[str]):
+    import json
+    from urllib.parse import quote
+    val = quote(json.dumps({"theme": theme, "anims": anims}))
+    ui.components.html(f"<script>try{{document.cookie='timar_pv={val}; max-age=31536000; path=/; SameSite=Lax';}}catch(e){{}}</script>", height=0)
+
+
+def _clear_preview_cookie():
+    ui.components.html("<script>try{document.cookie='timar_pv=; max-age=0; path=/; SameSite=Lax';}catch(e){}</script>", height=0)
+
+
+def _queue_preview_cookie(theme: str, anims: list[str]):
+    """Mémorise l'écriture du cookie pour le tour suivant : juste après un clic, un composant <script> suivi
+    aussitôt d'un st.rerun() n'a pas le temps de s'exécuter dans le navigateur avant que le rerun ne commence."""
+    st.session_state["_pv_cookie_op"] = ("set", theme, list(anims))
+
+
+def _queue_clear_preview_cookie():
+    st.session_state["_pv_cookie_op"] = ("clear",)
+
+
+def _flush_preview_cookie():
+    """À appeler tôt, sur chaque tour (le composant a alors le temps de s'exécuter avant un éventuel st.rerun())."""
+    op = st.session_state.pop("_pv_cookie_op", None)
+    if op and op[0] == "set":
+        _set_preview_cookie(op[1], op[2])
+    elif op and op[0] == "clear":
+        _clear_preview_cookie()
+
+
+def resolve_design():
+    """Design affiché dans cette session : l'essai personnel s'il existe (session, sinon cookie), sinon le design du site."""
+    import ui_designs
+    _flush_preview_cookie()                                             # écriture de cookie demandée au tour précédent, tôt pour lui laisser le temps
     try:
         t, a = site_design()
     except Exception:  # noqa: BLE001  (base pas encore prête : design par défaut)
         t, a = "Bleu Port", []
     me = st.session_state.get("design_me")
+    if not me:
+        me = _preview_cookie()
+        if me:
+            st.session_state["design_me"] = me
     if me and me.get("theme") in ui.THEMES:
         t, a = me["theme"], [x for x in me.get("anims", []) if x in ui_designs.ANIMS]
     st.session_state["theme"], st.session_state["anims"] = t, a
@@ -718,9 +771,9 @@ def design_box(user: dict | None):
     site_t, site_a = site_design()
     cur_t, cur_a = st.session_state.get("theme", site_t), st.session_state.get("anims", site_a)
     ui.sidebar_cap("Design du site" if admin else "Design", "sparkles")
-    msg = st.session_state.pop("_ds_msg", "")
+    msg = st.session_state.pop("_ds_msg", None)
     if msg:
-        st.success(msg)
+        (st.success if msg[0] == "ok" else st.error)(msg[1])
     if "_ds_auto_theme" not in st.session_state:                          # ne pas écraser un essai déjà enregistré au premier affichage
         st.session_state["_ds_auto_theme"] = cur_t
     t = st.selectbox("🎨 Thème", names, index=names.index(cur_t) if cur_t in names else 0, key="ds_theme",
@@ -732,25 +785,36 @@ def design_box(user: dict | None):
     a = st.multiselect("✨ Animations", list(ui_designs.ANIMS), default=[x for x in cur_a if x in ui_designs.ANIMS], key="ds_anims",
                        format_func=lambda k: ui_designs.ANIMS[k], placeholder="Aucune",
                        help="Se remplit automatiquement avec les animations du thème choisi ; vous pouvez en retirer ou en ajouter.")
+    can_sitewide = admin or user is None                               # régulier connecté (non Admin) : essai personnel seulement
     scope = st.radio("Pour qui ?", ["Moi seulement", "Tous les utilisateurs"], key="ds_scope", horizontal=True,
-                     help="« Moi seulement » : essai visible par vous seul. « Tous les utilisateurs » : devient le design du site pour tout le monde.") \
-        if admin else "Moi seulement"
+                     help="« Moi seulement » : essai gardé sur cet appareil. « Tous les utilisateurs » : devient le design du site pour tout le monde.") \
+        if can_sitewide else "Moi seulement"
+    needs_pw = can_sitewide and not admin and scope.startswith("Tous")
+    pw = st.text_input("🔑 Mot de passe Admin", type="password", key="ds_admin_pw",
+                       help="Pour appliquer à tous les utilisateurs sans passer par la connexion complète.") if needs_pw else ""
     if st.button("Appliquer", type="primary", use_container_width=True, key="ds_apply", icon=":material/palette:"):
         if scope.startswith("Tous"):
-            database.set_setting("SITE_THEME", "" if t == "Bleu Port" else t)
-            database.set_setting("SITE_ANIMS", ",".join(a))
-            st.session_state.pop("design_me", None)
-            _journal(user["email"], "design", f"{t} · {', '.join(a) or 'sans animation'} · tous les utilisateurs")
-            st.session_state["_ds_msg"] = f"Design appliqué à tous les utilisateurs : {t}."
+            if needs_pw and not database.verify_admin_password(pw):
+                st.session_state["_ds_msg"] = ("err", "Mot de passe incorrect.")
+            else:
+                database.set_setting("SITE_THEME", "" if t == "Bleu Port" else t)
+                database.set_setting("SITE_ANIMS", ",".join(a))
+                st.session_state.pop("design_me", None)
+                _queue_clear_preview_cookie()
+                _journal((user or {}).get("email") or "Admin (aperçu, sans connexion)", "design",
+                        f"{t} · {', '.join(a) or 'sans animation'} · tous les utilisateurs")
+                st.session_state["_ds_msg"] = ("ok", f"Design appliqué à tous les utilisateurs : {t}.")
         else:
             st.session_state["design_me"] = {"theme": t, "anims": list(a)}
-            st.session_state["_ds_msg"] = "Essai appliqué pour vous seul."
+            _queue_preview_cookie(t, list(a))
+            st.session_state["_ds_msg"] = ("ok", "Essai appliqué pour vous seul (gardé sur cet appareil, même après rechargement).")
         st.rerun()
     mine = st.session_state.get("design_me")
     st.caption(f"Pour tous : **{site_t}**" + (f" + {', '.join(site_a)}" if site_a else "")
                + (f"  \nVous voyez : **{mine['theme']}**" + (f" + {', '.join(mine.get('anims', []))}" if mine.get("anims") else "") + " (vous seul)" if mine else ""))
     if mine and st.button("Revenir au design du site", use_container_width=True, key="ds_reset", icon=":material/undo:"):
         st.session_state.pop("design_me", None)
+        _queue_clear_preview_cookie()
         for k in ("ds_theme", "ds_anims", "_ds_auto_theme"):
             st.session_state.pop(k, None)
         st.rerun()
