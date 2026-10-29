@@ -1,22 +1,17 @@
-# Apparence identique pour tous les utilisateurs (poste en mode clair ou sombre) + barre d'outils Streamlit masquée.
 [theme]
 base = "dark"
 primaryColor = "#3B82F6"
 backgroundColor = "#0A1020"
-secondaryBackgroundColor = "#15213A"
+secondaryBackgroundColor = "#101A2E"
 textColor = "#E6EBF5"
-linkColor = "#93C5FD"
-borderColor = "#24304A"
-dataframeBorderColor = "#24304A"
-baseRadius = "10px"
 font = "sans serif"
-
-[theme.sidebar]
-backgroundColor = "#0C1426"
-secondaryBackgroundColor = "#15213A"
 
 [client]
 toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false
+
+[server]
+maxUploadSize = 500
+enableStaticServing = true

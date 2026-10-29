@@ -33,6 +33,7 @@ import streamlit as st
 import cleaning
 import fileio
 import ui
+import ui_designs
 import units
 from openpyxl import Workbook
 from openpyxl.formatting.rule import CellIsRule
@@ -3232,8 +3233,10 @@ def sidebar_ai():
 def main():
     st.set_page_config(page_title="TIMAR · Ventilation Groupage Alstom Fez", page_icon="🚛", layout="wide",
                        initial_sidebar_state="auto")      # « auto » : ouverte sur ordinateur, repliée sur téléphone
-    if "theme" not in st.session_state:
-        st.session_state["theme"] = "Bleu Port"
+    import database
+    import views  # import local : évite l'import circulaire avec app.py
+    database.init_db()
+    views.resolve_design()                                         # design du site (choisi par l'Admin) ou essai personnel
     ui.inject_css()
 
     import database
@@ -3245,6 +3248,7 @@ def main():
     if not user:
         with st.sidebar:
             ui.sidebar_brand()
+            views.design_box(None)
         views.render_auth()
         ui.footer()
         return
@@ -3261,11 +3265,15 @@ def main():
             views.logout()
         user = st.session_state["auth_user"] = fresh
     is_admin = user["role"] == "admin"
+    if is_admin:
+        st.session_state["_was_admin"] = True                      # le bloc « Design » reste visible sur la page de connexion de ce navigateur
+        views.mark_admin_browser()
     pro = is_admin or database.effective_plan(user) == "pro"
     if not pro:                                                   # formule Gratuite : consultation + téléchargement seulement
         with st.sidebar:
             ui.sidebar_brand()
             views.sidebar_account(user)
+            views.design_box(user)
         views.render_user_space(user)
         ui.footer()
         return
@@ -3274,7 +3282,7 @@ def main():
     with st.sidebar:
         ui.sidebar_brand()
         views.sidebar_account(user)
-        st.selectbox("🎨 Thème", list(ui.THEMES), key="theme", help="Change les couleurs de l'application.")
+        views.design_box(user)
         ui.sidebar_cap("Module", "layers")
         modules = [":material/move_to_inbox: IMPORT · Ventilation groupage", ":material/outbox: EXPORT · BL & Factures"]
         modules += [":material/receipt_long: DÉCHARGE · Tableau depuis capture"]
@@ -3313,7 +3321,7 @@ def main():
                 st.caption("Pour les scans : `pip install --user easyocr`, ou indiquez un Tesseract portable ci-dessus.")
             st.write("")
             if st.button("Nouveau dossier", use_container_width=True, icon=":material/restart_alt:"):
-                protected = ("module", "auth_user", "theme")
+                protected = ("module", "auth_user", "theme", "anims", "design_me", "_was_admin")
                 for k in [k for k in st.session_state if (k.startswith("exp") if is_export else not k.startswith("exp"))]:
                     if k not in protected and not k.startswith("ai_"):
                         del st.session_state[k]

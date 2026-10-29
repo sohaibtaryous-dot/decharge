@@ -684,6 +684,96 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DISPATCH_FILES = ("FACTURES.xlsx", "BL_REFERENCES_SUMMARY.xlsx")
 
 
+
+# ----------------------------------------------------------------------------- design du site (thème + animations)
+def site_design() -> tuple[str, list[str]]:
+    """Design choisi par l'Admin pour tous les utilisateurs (réglages SITE_THEME / SITE_ANIMS)."""
+    import ui_designs
+    t = database.get_setting("SITE_THEME", "Bleu Port") or "Bleu Port"
+    a = [x for x in database.get_setting("SITE_ANIMS", "").split(",") if x in ui_designs.ANIMS]
+    return (t if t in ui.THEMES else "Bleu Port"), a
+
+
+def resolve_design():
+    """Design affiché dans cette session : l'essai personnel s'il existe, sinon le design du site."""
+    import ui_designs
+    try:
+        t, a = site_design()
+    except Exception:  # noqa: BLE001  (base pas encore prête : design par défaut)
+        t, a = "Bleu Port", []
+    me = st.session_state.get("design_me")
+    if me and me.get("theme") in ui.THEMES:
+        t, a = me["theme"], [x for x in me.get("anims", []) if x in ui_designs.ANIMS]
+    st.session_state["theme"], st.session_state["anims"] = t, a
+
+
+def _admin_cookie() -> bool:
+    """Navigateur où l'Admin s'est déjà connecté (cookie « timar_ds ») : le bloc « Design » s'affiche aussi avant la connexion."""
+    try:
+        return st.context.cookies.get("timar_ds") == "1"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def mark_admin_browser():
+    """Pose le cookie « timar_ds » (1 an) dans le navigateur de l'Admin ; une fois par session."""
+    if st.session_state.get("_ds_cookie"):
+        return
+    st.session_state["_ds_cookie"] = True
+    ui.components.html("<script>try{window.parent.document.cookie='timar_ds=1; max-age=31536000; path=/; SameSite=Lax';}catch(e){}</script>", height=0)
+
+
+def design_box(user: dict | None):
+    """Barre latérale « Design » : thème + animations. L'Admin choisit pour qui : lui seul (essai) ou tous les utilisateurs.
+    Avant la connexion, le bloc n'apparaît que dans un navigateur où l'Admin s'est déjà connecté (aperçu pour lui seul)."""
+    import ui_designs
+    admin = bool(user and user.get("role") == "admin")
+    if not admin:
+        allowed = (bool(st.session_state.get("_was_admin")) or _admin_cookie()) if user is None else database.get_setting("USER_DESIGN_CHOICE") == "1"
+        if not allowed:
+            return
+    names = list(ui.THEMES)
+    site_t, site_a = site_design()
+    cur_t, cur_a = st.session_state.get("theme", site_t), st.session_state.get("anims", site_a)
+    ui.sidebar_cap("Design du site" if admin else "Design", "sparkles")
+    msg = st.session_state.pop("_ds_msg", "")
+    if msg:
+        st.success(msg)
+    t = st.selectbox("🎨 Thème", names, index=names.index(cur_t) if cur_t in names else 0, key="ds_theme",
+                     help="« Bleu Port » = design actuel · 1 à 16 = nouveaux designs · « Bleu Port (classique) » = ancien design.")
+    a = st.multiselect("✨ Animations", list(ui_designs.ANIMS), default=[x for x in cur_a if x in ui_designs.ANIMS], key="ds_anims",
+                       format_func=lambda k: ui_designs.ANIMS[k], placeholder="Aucune")
+    scope = st.radio("Pour qui ?", ["Moi seulement", "Tous les utilisateurs"], key="ds_scope", horizontal=True,
+                     help="« Moi seulement » : essai visible par vous seul. « Tous les utilisateurs » : devient le design du site pour tout le monde.") \
+        if admin else "Moi seulement"
+    if st.button("Appliquer", type="primary", use_container_width=True, key="ds_apply", icon=":material/palette:"):
+        if scope.startswith("Tous"):
+            database.set_setting("SITE_THEME", "" if t == "Bleu Port" else t)
+            database.set_setting("SITE_ANIMS", ",".join(a))
+            st.session_state.pop("design_me", None)
+            _journal(user["email"], "design", f"{t} · {', '.join(a) or 'sans animation'} · tous les utilisateurs")
+            st.session_state["_ds_msg"] = f"Design appliqué à tous les utilisateurs : {t}."
+        else:
+            st.session_state["design_me"] = {"theme": t, "anims": list(a)}
+            st.session_state["_ds_msg"] = "Essai appliqué pour vous seul."
+        st.rerun()
+    mine = st.session_state.get("design_me")
+    st.caption(f"Pour tous : **{site_t}**" + (f" + {', '.join(site_a)}" if site_a else "")
+               + (f"  \nVous voyez : **{mine['theme']}**" + (f" + {', '.join(mine.get('anims', []))}" if mine.get("anims") else "") + " (vous seul)" if mine else ""))
+    if mine and st.button("Revenir au design du site", use_container_width=True, key="ds_reset", icon=":material/undo:"):
+        st.session_state.pop("design_me", None)
+        for k in ("ds_theme", "ds_anims"):
+            st.session_state.pop(k, None)
+        st.rerun()
+    if admin:
+        on = database.get_setting("USER_DESIGN_CHOICE") == "1"
+        new = st.checkbox("Les utilisateurs peuvent essayer un design (pour eux seuls)", value=on, key="ds_users")
+        if new != on:
+            database.set_setting("USER_DESIGN_CHOICE", "1" if new else "")
+    elif user is None:
+        st.caption("Aperçu pour vous seul. Pour l'appliquer à tous les utilisateurs, connectez-vous en Admin.")
+
+
 def current_user() -> dict | None:
     return st.session_state.get("auth_user")
 
@@ -698,7 +788,9 @@ def _journal(email: str, action: str, detail: str = ""):
 
 def logout():
     _journal((st.session_state.get("auth_user") or {}).get("email", ""), "logout")
+    keep = {k: st.session_state[k] for k in ("design_me", "_was_admin") if k in st.session_state}      # le design essayé reste pour la page de connexion
     st.session_state.clear()
+    st.session_state.update(keep)
     st.rerun()
 
 
@@ -833,6 +925,8 @@ def upgrade_card():
 
 def render_auth():
     """Page d'accueil : connexion / inscription (ou création du premier compte Admin)."""
+    import ui_designs
+    ui_designs.login_background(st.session_state.get("theme", "Bleu Port"))     # designs « waw » : scène animée en fond
     ui.hero_3d({"accès": "sécurisé", "validation": "par l'Admin", "espace": "personnel"},
                badge="TIMAR TANGER · ESPACE SÉCURISÉ", title="Connexion", highlight="Dossiers dédouanés",
                desc="Connectez-vous pour consulter les fichiers qui vous ont été attribués. Les nouveaux comptes sont "
@@ -842,28 +936,40 @@ def render_auth():
     if not ui._pro():                                    # design classique : formules avant la connexion
         ui.section("Nos formules", "⚡")
         plans_card()
-    import ui_login_lamp
-    ui_login_lamp.inject()
+    import ui_login_designs
+    theme = st.session_state.get("theme", "Bleu Port")
+    cpt = ui_login_designs.concept(theme)                # design choisi : carte et objet animé propres au design
+    if cpt:
+        st.markdown(ui_login_designs.css(theme), unsafe_allow_html=True)
+    else:                                                # « Bleu Port » et anciens thèmes : la lampe
+        import ui_login_lamp
+        ui_login_lamp.inject()
+    pre = "lgx" if cpt else "lamp"
     _, mid, _ = st.columns([0.6, 2, 0.6])
     with mid:
-        with st.container(key="card_auth_blue"):
+        with st.container(key="card_login" if cpt else "card_auth_blue"):
             if st.session_state.get("verify_email"):
                 _verify_step(st.session_state["verify_email"])
                 return
             lamp_on = st.session_state.get("lamp_on", False)
             left, right = st.columns([0.8, 1.2], gap="large")
             with left:
-                st.markdown(ui_login_lamp.lamp_scene(lamp_on), unsafe_allow_html=True)
-                if st.button("Éteindre la lampe" if lamp_on else "Tirer le cordon  💡", key="lamp_pull", use_container_width=True):
+                if cpt:
+                    st.markdown(ui_login_designs.scene(theme, lamp_on), unsafe_allow_html=True)
+                    label, hint = cpt["btn"][1 if lamp_on else 0], cpt["hint"]
+                else:
+                    st.markdown(ui_login_lamp.lamp_scene(lamp_on), unsafe_allow_html=True)
+                    label, hint = ("Éteindre la lampe" if lamp_on else "Tirer le cordon  💡"), "Tirez le cordon pour allumer et vous connecter"
+                if st.button(label, key="lamp_pull", use_container_width=True):
                     st.session_state["lamp_on"] = not lamp_on
                     st.rerun()
                 if not lamp_on:
-                    st.markdown('<div class="lamp-hint">Tirez le cordon pour allumer et vous connecter</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="{pre}-hint">{hint}</div>', unsafe_allow_html=True)
             with right:
                 if not lamp_on:
-                    st.markdown('<div class="lamp-ghost"><h3>Connexion</h3><p>E-mail</p><p>Mot de passe</p></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="{pre}-ghost"><h3>Connexion</h3><p>E-mail</p><p>Mot de passe</p></div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="lamp-form"></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="{pre}-form"></div>', unsafe_allow_html=True)
                     _auth_forms()
     if ui._pro():                                        # design professionnel : la connexion d'abord, les formules ensuite
         ui.section("Nos formules", "⚡")

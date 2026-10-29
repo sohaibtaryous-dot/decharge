@@ -451,6 +451,9 @@ THEMES = {
                         "rgb": {}, "raw": {"color:#fff;font-variant": "color:#0F172A;font-variant"}, "css": "LIGHT"},
 }
 
+import ui_designs  # noqa: E402  (designs à essayer : menu « Thème »)
+THEMES = ui_designs.register(THEMES)
+
 
 # =============================================================================
 # DESIGN PROFESSIONNEL (thème par défaut) — CSS seul : aucune animation permanente, aucune iframe
@@ -569,7 +572,8 @@ def page_header(stats: dict | None, badge: str, title: str, highlight: str, desc
     """En-tête compact : fil d'Ariane, titre, description et indicateurs (HTML natif, aucune iframe)."""
     chips = "".join(f'<div class="ph-stat"><b>{html.escape(str(v))}</b><span>{html.escape(k)}</span></div>' for k, v in (stats or {}).items())
     ai = f'<span class="ph-ai">{icon("sparkles", 12)}{html.escape(ai_label)}</span>' if ai_label else ""
-    st.markdown(skin(f'<div class="ph"><div class="ph-l"><div class="ph-crumb"><i></i>{html.escape(badge)}{ai}</div>'
+    art = ui_designs.header_art(st.session_state.get("theme", "Bleu Port"), stats, badge, title)
+    st.markdown(skin(f'<div class="ph{" has-art" if art else ""}">{art}<div class="ph-l"><div class="ph-crumb"><i></i>{html.escape(badge)}{ai}</div>'
                      f'<h1>{html.escape(title)} <em class="hl">{html.escape(highlight)}</em></h1><p>{html.escape(desc)}</p></div>'
                      f'<div class="ph-stats">{chips}</div></div>'), unsafe_allow_html=True)
 
@@ -583,11 +587,22 @@ def sidebar_user(email: str, role: str):
                 f'<span><i></i>{html.escape(role)}</span></div></div>', unsafe_allow_html=True)
 
 
-def skin(text: str, theme: str | None = None) -> str:
+def skin(text: str, theme: str | None = None, special: bool = True) -> str:
     """Applique le thème choisi (st.session_state['theme'] par défaut) à un bloc CSS / HTML."""
     theme = theme or st.session_state.get("theme", "Bleu Port")
     spec = THEMES.get(theme)
     if not spec:
+        return text
+    if spec.get("design"):                              # designs : une seule passe (une couleur remplacée n'est jamais remplacée une 2e fois)
+        import re
+        hx = {k.upper(): v for k, v in spec["hex"].items()}
+        text = re.sub(r"(#|%23)(" + "|".join(hx) + r")\b", lambda m: m.group(1) + hx[m.group(2).upper()], text, flags=re.I)
+        rg = spec["rgb"]
+        text = re.sub("|".join(re.escape(k) for k in rg), lambda m: rg[m.group(0)], text)
+        for old, new in spec.get("raw", {}).items():
+            text = text.replace(old, new)
+        if special and spec.get("css") and "</style>" in text:
+            text = text.replace("</style>", LIGHT_CSS + "\n</style>", 1)
         return text
     for old, new in spec["hex"].items():
         text = text.replace("#" + old, "#" + new).replace("%23" + old, "%23" + new)
@@ -625,14 +640,21 @@ FX_JS = """
 
 def inject_css():
     theme = st.session_state.get("theme", "Bleu Port")
-    if theme in ("Bleu Port", CLASSIC):                                 # sans fond animé ni effets
-        st.markdown(GLOBAL_CSS.split("/* ===== Fond professionnel")[0] + "</style>", unsafe_allow_html=True)
-        if theme == "Bleu Port":
-            st.markdown(PRO_CSS + PRO_DARK_VARS, unsafe_allow_html=True)
-        return
-    st.markdown(skin(GLOBAL_CSS), unsafe_allow_html=True)
-    st.markdown(skin(PRO_CSS) + ("" if THEMES[theme].get("css") == "LIGHT" else PRO_DARK_VARS), unsafe_allow_html=True)
-    components.html(f"<script>{FX_JS}</script>", height=0)
+    spec = THEMES.get(theme) or {}
+    if theme in ("Bleu Port", CLASSIC) or spec.get("design"):          # sans fond animé ni effets
+        st.markdown(skin(GLOBAL_CSS.split("/* ===== Fond professionnel")[0] + "</style>"), unsafe_allow_html=True)
+        if theme == CLASSIC:
+            return
+        st.markdown(skin(PRO_CSS, special=False) + ("" if spec.get("css") == "LIGHT" else PRO_DARK_VARS), unsafe_allow_html=True)
+    else:
+        st.markdown(skin(GLOBAL_CSS), unsafe_allow_html=True)
+        st.markdown(skin(PRO_CSS) + ("" if spec.get("css") == "LIGHT" else PRO_DARK_VARS), unsafe_allow_html=True)
+        components.html(f"<script>{FX_JS}</script>", height=0)
+    extra = ui_designs.css(theme)                                       # design choisi + animations cochées (menu « Animations »)
+    if extra:
+        st.markdown(extra, unsafe_allow_html=True)
+    if ui_designs.needs_engine(theme):
+        components.html(ui_designs.engine_html(theme), height=0)
 
 
 # =============================================================================
@@ -1015,6 +1037,10 @@ document.querySelectorAll('.v[data-to]').forEach(el=>{{const to=+el.dataset.to,d
   (function s(t){{const p=Math.min(1,(t-t0)/D),e=1-Math.pow(1-p,3);el.textContent=fmt(to*e,d);if(p<1)requestAnimationFrame(s);}})(t0);}});
 </script></body></html>"""
     rows = 1 if n <= 6 else 2
+    if (THEMES.get(st.session_state.get("theme", "Bleu Port")) or {}).get("design"):      # cartes aux couleurs du design choisi
+        page = skin(page, special=False)
+        if ui_designs.is_light(st.session_state.get("theme", "")):
+            page = page.replace("color:#fff;margin:11px", "color:#0F172A;margin:11px")
     components.html(page, height=124 * rows)
 
 

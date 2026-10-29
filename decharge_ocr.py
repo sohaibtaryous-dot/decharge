@@ -16,7 +16,7 @@ import os
 import re
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")                  # Tesseract mono-thread : lectures parallèles sans saturer le processeur
 
@@ -59,9 +59,9 @@ def _cluster(idx: np.ndarray, gap: int = 2) -> list[int]:
 
 
 def find_headers(arr: np.ndarray) -> list[tuple[int, int, int, int]]:
-    """Bandes d'en-tête bleues (≈ #00619A) : [(x0, y0, x1, y1)]."""
+    """Bandes d'en-tête bleues (foncé ≈ #00619A ou clair ≈ #00B0F0) : [(x0, y0, x1, y1)]."""
     r, g, b = arr[..., 0].astype(int), arr[..., 1].astype(int), arr[..., 2].astype(int)
-    mask = (r < 45) & (g > 70) & (g < 125) & (b > 125) & (b < 185)
+    mask = (r < 70) & (g > 70) & (b > 120) & (b > g + 30) & (b > r + 90)
     rowc = mask.sum(1)
     thr = max(120, int(arr.shape[1] * 0.12))
     bands, cur = [], []
@@ -88,8 +88,10 @@ def _grid(arr: np.ndarray, hdr: tuple[int, int, int, int]):
     x0, y0, x1, y1 = hdr
     gray = np.asarray(Image.fromarray(arr).convert("L")).astype(int)
     body = gray[y1 + 1: min(gray.shape[0], y1 + 1 + 900), max(0, x0 - 4): x1 + 5]
-    dark = float(np.median(body)) < 128
-    mask = (body > 175) if dark else (body < 95)
+    bgv = float(np.median(body))
+    dark = bgv < 128
+    # traits fins ou flous (capture réduite / agrandie par le navigateur) : seuil à 35 % de l'écart fond ↔ couleur extrême du trait
+    mask = (body > bgv + 0.35 * (255 - bgv)) if dark else (body < bgv - 0.35 * bgv)
     w = x1 - x0
     hl = _longest_run(mask, 1)
     ys = _cluster(np.where(hl >= 0.8 * w)[0])
@@ -195,13 +197,16 @@ def _vote(img: Image.Image, box: tuple[int, int, int, int], dark: bool, col: str
     th = max(1, by1 - by0)
     wl = WHITELIST.get(col, "")
     reads: list[str] = []
-    for k, (target, psm) in enumerate(((48, 7), (40, 7), (56, 7), (64, 7), (48, 8))):   # essais : 48 px / mode « ligne » = le plus fiable
+    # essais : 48 px, mode « ligne » (le plus fiable), avec ou sans léger flou (captures agrandies / réduites par le navigateur ou Windows)
+    for k, (target, psm, blur) in enumerate(((48, 7, True), (48, 7, False), (40, 7, True), (56, 7, True), (64, 7, False), (48, 8, False))):
         sc = target / th
         g = crop.convert("L")
         if dark:
             g = ImageOps.invert(g)
         g = ImageOps.autocontrast(g, cutoff=0)
         g = g.resize((max(1, round(g.width * sc)), max(1, round(g.height * sc))), Image.LANCZOS)
+        if blur:
+            g = g.filter(ImageFilter.GaussianBlur(1.2))
         reads.append(_clean(col, _ocr(ImageOps.expand(g, border=30, fill=255), wl, psm)))
         if k == 2 and len(set(reads)) == 1:
             break                                                           # trois lectures identiques : inutile d'insister
@@ -231,7 +236,8 @@ def _cell_glyphs(img: Image.Image, box, dark: bool):
     a = np.clip((g - bg) / (ext - bg), 0, 1)
     ink = a > 0.5
     cols = ink.any(0)
-    runs = _runs(cols)
+    h = ink.shape[0]
+    runs = [(c0, c1) for c0, c1 in _runs(cols) if ink[:, c0:c1 + 1].any(1).sum() < 0.9 * h]    # trait de bordure de cellule résiduel : pas un chiffre
     if not runs:
         return []
     widths = sorted(r1 - r0 + 1 for r0, r1 in runs)
@@ -248,6 +254,8 @@ def _cell_glyphs(img: Image.Image, box, dark: bool):
             sub = a[:, p0:p1 + 1]
             rows = np.where((sub > 0.5).any(1))[0]
             if len(rows) == 0:
+                continue
+            if rows.max() - rows.min() + 1 < 0.3 * h:                        # miette de bord / point : pas un chiffre
                 continue
             out.append(sub[rows.min(): rows.max() + 1])
     return out
@@ -274,8 +282,30 @@ def _pad(g: np.ndarray, H: int, W: int) -> np.ndarray:
     return out
 
 
-def _classify(glyphs, templates: dict) -> tuple[str, float]:
-    """Chiffres d'une cellule d'après les gabarits (tous les gabarits comparés d'un coup, décalage horizontal de ±1 px toléré)."""
+def _upper_right_ink(g: np.ndarray) -> float:
+    """Encre dans le coin haut-droit (20-42 % de la hauteur, 38 % de largeur à droite) : un 8 y est fermé (≈ 0,4-0,5), un 6 y est ouvert (≈ 0-0,12)."""
+    h, w = g.shape
+    return float((g[int(0.2 * h): int(0.42 * h) + 1, int(0.62 * w):] > 0.5).mean())
+
+
+def _clean_templates(samples: list[tuple[str, np.ndarray]]) -> dict[str, list]:
+    """Gabarits par chiffre à partir de lectures OCR dont certaines sont fausses (Tesseract lit parfois 8 → 6 sur une capture réduite).
+    La forme tranche : un « 6 » fermé en haut à droite est un 8, un « 8 » ouvert à cet endroit est un 6."""
+    out: dict[str, list] = {}
+    for c, g in samples:
+        if g.shape[0] >= 9 and g.shape[1] >= 4:
+            f = _upper_right_ink(g)
+            if c == "6" and f >= 0.34:
+                c = "8"
+            elif c == "8" and f <= 0.08:
+                c = "6"
+        out.setdefault(c, []).append(g)
+    return out
+
+
+def _classify(glyphs, templates: dict) -> tuple[str, float, float]:
+    """Chiffres d'une cellule d'après les gabarits (tous comparés d'un coup, décalage horizontal de ±1 px toléré).
+    Renvoie (texte, pire distance, pire marge) ; marge = distance du 2e meilleur chiffre ÷ distance du meilleur (plus grand = plus sûr)."""
     keys, mats = [], []
     H = max([g.shape[0] for ts in templates.values() for g in ts] + [g.shape[0] for g in glyphs]) + 1
     W = max([g.shape[1] for ts in templates.values() for g in ts] + [g.shape[1] for g in glyphs]) + 3
@@ -284,7 +314,8 @@ def _classify(glyphs, templates: dict) -> tuple[str, float]:
             keys.append(ch)
             mats.append(_pad(t, H, W))
     T = np.stack(mats)
-    txt, worst = "", 0.0
+    karr = np.array(keys)
+    txt, worst, margin = "", 0.0, 99.0
     for gl in glyphs:
         g = _pad(gl, H, W)
         best = np.full(len(keys), 9.0)
@@ -292,9 +323,12 @@ def _classify(glyphs, templates: dict) -> tuple[str, float]:
             gs = np.roll(g, dx, axis=1)
             best = np.minimum(best, np.abs(T - gs).mean(axis=(1, 2)))
         k = int(best.argmin())
+        other = best[karr != keys[k]]
         txt += keys[k]
         worst = max(worst, float(best[k]))
-    return txt, worst
+        if len(other):
+            margin = min(margin, float(other.min()) / max(float(best[k]), 1e-6))
+    return txt, worst, margin
 
 
 def _clean(col: str, raw: str) -> str:
@@ -321,13 +355,13 @@ def read_table(img: Image.Image, hdr, arr: np.ndarray) -> dict | None:
     with ThreadPoolExecutor(max_workers=4) as ex:                                 # Tesseract = sous-processus : lectures en parallèle
         ocr = dict(zip(cells, ex.map(lambda ij: _vote(img, boxes[ij], dark, names[ij[1]]), cells)))
     # gabarits des chiffres : cellules COMPTE / NGP dont le nombre de caractères = nombre de chiffres lus
-    templates: dict[str, list] = {}
+    samples: list[tuple[str, np.ndarray]] = []
     for (i, j), txt in ocr.items():
         if names[j] in ("COMPTE", "NGP") and re.fullmatch(r"\d{10,17}", txt or ""):
             gl = _cell_glyphs(img, boxes[(i, j)], dark)
             if len(gl) == len(txt):
-                for ch, g in zip(txt, gl):
-                    templates.setdefault(ch, []).append(g)
+                samples.extend(zip(txt, gl))
+    templates = _clean_templates(samples)
     tmpl_ok = len(templates) >= 8
     expect = {"COMPTE": 17, "NGP": 10}
     if tmpl_ok:
@@ -337,9 +371,10 @@ def read_table(img: Image.Image, hdr, arr: np.ndarray) -> dict | None:
                 gl = _cell_glyphs(img, boxes[(i, j)], dark)
                 if not gl:
                     continue
-                t2, worst = _classify(gl, templates)
+                t2, worst, margin = _classify(gl, templates)
                 n = expect.get(col)
-                good = (len(gl) == n and worst < 0.3) if n else worst < 0.2          # COMPTE / NGP : longueur connue, seuil plus large
+                # COMPTE / NGP : longueur connue -> seuil large ; sinon : écart net avec le chiffre suivant (marge) ou distance faible
+                good = (len(gl) == n and worst < 0.3 and margin > 1.2) if n else (worst < 0.2 and margin > 1.2) or (worst < 0.35 and margin > 1.5)
                 if good and t2 != txt:
                     ocr[(i, j)] = t2
     rows = []
@@ -350,13 +385,8 @@ def read_table(img: Image.Image, hdr, arr: np.ndarray) -> dict | None:
     return {"title": _title(img, hdr), "columns": names, "rows": rows}
 
 
-def read_image(data: bytes) -> list[dict]:
-    """Tous les tableaux d'une capture : [{"title", "columns", "rows"}]."""
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-    scale = 1
-    if img.width < 900:                                                    # petite capture : agrandie pour une grille et des chiffres plus nets
-        scale = 2
-        img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
+def _read_scaled(raw: Image.Image, scale: int) -> list[dict]:
+    img = raw if scale == 1 else raw.resize((raw.width * scale, raw.height * scale), Image.LANCZOS)
     arr = np.asarray(img)
     out = []
     for hdr in find_headers(arr):
@@ -364,6 +394,17 @@ def read_image(data: bytes) -> list[dict]:
         if t and t["rows"]:
             out.append(t)
     return out
+
+
+def read_image(data: bytes) -> list[dict]:
+    """Tous les tableaux d'une capture : [{"title", "columns", "rows"}]. Petite capture : agrandie ×2 ; rien trouvé : nouvel essai à une autre échelle."""
+    raw = Image.open(io.BytesIO(data)).convert("RGB")
+    first = 2 if raw.width < 900 else 1
+    for scale in dict.fromkeys((first, 2 if first == 1 else 3, 3 if first == 1 else 1)):
+        tabs = _read_scaled(raw, scale)
+        if tabs:
+            return tabs
+    return []
 
 
 def validate(table: dict) -> list[str]:
