@@ -22,6 +22,8 @@ os.environ.setdefault("OMP_THREAD_LIMIT", "1")                  # Tesseract mono
 
 COLUMNS7 = ["COMPTE", "NGP", "ORDRE", "QTE NET", "QTE BRUT", "T/O/N", "TX %"]
 COLUMNS6 = ["COMPTE", "NGP", "QTE NET", "QTE BRUT", "T/O/N", "TX %"]
+COLUMNS5 = ["COMPTE", "NGP", "ORDRE", "QTE NET", "QTE BRUT"]              # certains clients : pas de colonnes T/O/N ni TX %
+COLUMNS4 = ["COMPTE", "NGP", "QTE NET", "QTE BRUT"]                       # … et parfois sans ORDRE non plus
 WHITELIST = {"COMPTE": "0123456789", "NGP": "0123456789", "ORDRE": "0123456789", "QTE NET": "0123456789",
              "QTE BRUT": "0123456789NA", "T/O/N": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/", "TX %": "0123456789NA%.,"}
 
@@ -348,7 +350,8 @@ def read_table(img: Image.Image, hdr, arr: np.ndarray) -> dict | None:
     if len(ys) < 2 or len(xs) < 5:
         return None
     ncol = len(xs) - 1
-    names = COLUMNS7 if ncol == 7 else (COLUMNS6 if ncol == 6 else [f"COL{i + 1}" for i in range(ncol)])
+    fixed = {4: COLUMNS4, 5: COLUMNS5, 6: COLUMNS6, 7: COLUMNS7}
+    names = fixed.get(ncol) or [f"COL{i + 1}" for i in range(ncol)]
     from concurrent.futures import ThreadPoolExecutor
     cells = [(i, j) for i in range(len(ys) - 1) for j in range(ncol)]
     boxes = {(i, j): (xs[j], xs[j + 1], ys[i], ys[i + 1]) for i, j in cells}
