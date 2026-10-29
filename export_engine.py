@@ -1545,16 +1545,28 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
                     opts[uid] = (f"L{uid + 1 if isinstance(uid, int) else len(opts) + 1} · {str(l['ref']).strip()} — {(l.get('desc') or '')[:30]} · qté {l['qty']:g} · "
                                  f"facture {l.get('inv', '')} · article {ai + 1}" + (f" · unité {l['hu']}" if l.get("hu") else ""))
             opts = dict(sorted(opts.items(), key=lambda kv: (0, kv[0], 0) if isinstance(kv[0], int) else (1, kv[0][0], kv[0][1])))
-            fa, fb = st.columns([2, 1])
-            picks = fa.multiselect("Références dont je connais le poids", list(opts), format_func=lambda k: opts[k], key=f"{P}_fixrefs",
-                                   placeholder="Choisir les références…",
-                                   help="Quand la packing list ne donne que le total de plusieurs pièces : choisissez les références dont vous connaissez le poids. "
-                                        "Chacune reçoit le poids saisi (par référence), pris sur le poids de son unité de manutention : le reste de l'unité est réparti sur ses autres références ; "
-                                        "une unité à une seule référence garde son poids exact.")
-            unit = fb.number_input("Poids par référence (kg)", min_value=0.0, value=0.0, step=0.5, format="%.3f", key=f"{P}_fixw")
-        if unit > 0 and picks:
-            vent.notes = vent.notes + vx.apply_ref_net(vent, set(picks), unit)
-            fix_sig = (tuple(sorted(picks)), round(unit, 4))
+            n_grp = int(st.number_input("Nombre de poids différents", min_value=1, max_value=8, value=1, step=1, key=f"{P}_nfix",
+                                        help="Une case par poids : par exemple 7 kg pour certaines références et 9 kg pour d'autres."))
+            weights: dict = {}                                       # uid de ligne -> kg imposé
+            for g in range(n_grp):
+                taken = set(weights)
+                avail = [k for k in opts if k not in taken]
+                gkey = f"{P}_fixrefs" if g == 0 else f"{P}_fixrefs_{g}"
+                wkey = f"{P}_fixw" if g == 0 else f"{P}_fixw_{g}"
+                st.session_state[gkey] = [v for v in st.session_state.get(gkey, []) if v in avail]      # retire ce qu'un groupe précédent a pris
+                fa, fb = st.columns([2, 1])
+                gp = fa.multiselect("Références dont je connais le poids" + (f" — groupe {g + 1}" if n_grp > 1 else ""), avail, format_func=lambda k: opts[k],
+                                    key=gkey, placeholder="Choisir les références…",
+                                    help="Quand la packing list ne donne que le total de plusieurs pièces : choisissez les références dont vous connaissez le poids. "
+                                         "Chacune reçoit le poids saisi (par référence), pris sur le poids de son unité de manutention : le reste de l'unité est réparti sur ses autres références ; "
+                                         "une unité à une seule référence garde son poids exact.")
+                gw = fb.number_input("Poids par référence (kg)" + (f" — groupe {g + 1}" if n_grp > 1 else ""), min_value=0.0, value=0.0, step=0.5, format="%.3f", key=wkey)
+                if gw > 0:
+                    for k in gp:
+                        weights[k] = float(gw)
+        if weights:
+            vent.notes = vent.notes + vx.apply_ref_net(vent, weights)
+            fix_sig = tuple(sorted((str(k), round(w, 4)) for k, w in weights.items()))
     cost = vi.costs(vent, rate, fret, acc) if imp else None
     st.dataframe(vent.summary_df(rate, cost["coef"] if cost else 1.0), use_container_width=True, hide_index=True,
                  column_config={"Poids net (kg)": st.column_config.NumberColumn(format="%.3f"),

@@ -403,14 +403,18 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
     return Ventilation(kept, totals or _totals(df), [], notes)
 
 
-def apply_ref_net(vent: Ventilation, picks: set, kg_per_ref: float) -> list[str]:
+def apply_ref_net(vent: Ventilation, picks, kg_per_ref: float = 0.0) -> list[str]:
     """Poids connu de certaines lignes de référence (la packing list ne donne que le total de plusieurs pièces) : chaque ligne choisie
     (identifiée par son `uid` = position de la ligne dans le tableau BL, stable quel que soit le classement ; à défaut (n° d'article, n° de ligne)) reçoit `kg_per_ref` kg. Ce poids est PRIS sur l'unité de manutention de la ligne :
     le reste du poids de cette unité est réparti sur les autres références de la même unité ; les unités à une seule référence gardent
     leur poids exact et ne bougent pas. Les lignes sans unité connue (pas de packing list) se partagent le reste du poids net du dossier.
+    `picks` : ensemble de lignes (toutes au poids `kg_per_ref`) ou dict {ligne: kg} quand plusieurs poids différents sont connus.
     Les références répétées ne sont jamais fusionnées."""
-    if kg_per_ref <= 0 or not picks:
+    kg = dict(picks) if isinstance(picks, dict) else {k: float(kg_per_ref) for k in picks}
+    kg = {k: float(w) for k, w in kg.items() if w and float(w) > 0}
+    if not kg:
         return []
+    picks = set(kg)
     lines = [(l.get("uid", (ai, li)), l) for ai, a in enumerate(vent.articles) for li, l in enumerate(a.lines)]
     chosen = [l for k, l in lines if k in picks]
     if not chosen:
@@ -419,9 +423,13 @@ def apply_ref_net(vent: Ventilation, picks: set, kg_per_ref: float) -> list[str]
     for k, l in lines:
         pools.setdefault((str(l.get("bl", "")), str(l["hu"])) if l.get("hu") else None, []).append((k, l))
     known_sum = sum(float(l["net"]) for key, ms in pools.items() if key for _, l in ms)
-    notes = [f"Poids net imposé : {kg_per_ref:g} kg × {len(chosen)} ligne(s) de référence choisie(s) = {kg_per_ref * len(chosen):g} kg."]
+    by_w: dict = {}
+    for k, l in lines:
+        if k in picks:
+            by_w[kg[k]] = by_w.get(kg[k], 0) + 1
+    notes = ["Poids net imposé : " + " + ".join(f"{n} × {w:g} kg" for w, n in sorted(by_w.items())) + f" = {sum(w * n for w, n in by_w.items()):g} kg."]
     for key, ms in pools.items():
-        ch = [l for k, l in ms if k in picks]
+        ch = [(k, l) for k, l in ms if k in picks]
         if not ch:
             continue
         oth = [l for k, l in ms if k not in picks]
@@ -429,10 +437,11 @@ def apply_ref_net(vent: Ventilation, picks: set, kg_per_ref: float) -> list[str]
             pool_total, label = sum(float(l["net"]) for _, l in ms), f"Unité {key[1]}"
         else:
             pool_total, label = float(vent.totals.get("net", 0.0)) - known_sum, "Lignes sans unité de manutention" if known_sum else "Dossier"
-        fixed = kg_per_ref * len(ch)
-        for l in ch:
-            l["net"] = kg_per_ref
+        fixed = sum(kg[k] for k, _ in ch)
+        for k, l in ch:
+            l["net"] = kg[k]
         rest = pool_total - fixed
+        detail = " + ".join(f"{sum(1 for k, _ in ch if kg[k] == w)} × {w:g}" for w in sorted({kg[k] for k, _ in ch}))
         if rest < -0.0005:
             notes.append(f"⚠ {label} : le poids imposé ({fixed:g} kg) dépasse le poids disponible ({pool_total:g} kg) : vérifiez le poids saisi.")
             rest = 0.0
@@ -444,7 +453,7 @@ def apply_ref_net(vent: Ventilation, picks: set, kg_per_ref: float) -> list[str]
                 base = [1.0] * len(oth)
             for l, x in zip(oth, base):
                 l["net"] = rest * x / sum(base)
-            notes.append(f"{label} : {pool_total:g} kg − {len(ch)} × {kg_per_ref:g} kg = {rest:g} kg répartis sur les {len(oth)} autre(s) référence(s) de ce groupe.")
+            notes.append(f"{label} : {pool_total:g} kg − ({detail}) kg = {rest:g} kg répartis sur les {len(oth)} autre(s) référence(s) de ce groupe.")
         elif abs(rest) > 0.005 * max(pool_total, 1.0):
             notes.append(f"⚠ {label} : toutes les références ont un poids imposé ({fixed:g} kg) mais le poids disponible est de {pool_total:g} kg.")
     return notes
