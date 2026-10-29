@@ -3265,9 +3265,6 @@ def main():
             views.logout()
         user = st.session_state["auth_user"] = fresh
     is_admin = user["role"] == "admin"
-    if is_admin:
-        st.session_state["_was_admin"] = True                      # le bloc « Design » reste visible sur la page de connexion de ce navigateur
-        views.mark_admin_browser()
     pro = is_admin or database.effective_plan(user) == "pro"
     if not pro:                                                   # formule Gratuite : consultation + téléchargement seulement
         with st.sidebar:
@@ -3321,7 +3318,7 @@ def main():
                 st.caption("Pour les scans : `pip install --user easyocr`, ou indiquez un Tesseract portable ci-dessus.")
             st.write("")
             if st.button("Nouveau dossier", use_container_width=True, icon=":material/restart_alt:"):
-                protected = ("module", "auth_user", "theme", "anims", "design_me", "_was_admin")
+                protected = ("module", "auth_user", "theme", "anims", "design_me")
                 for k in [k for k in st.session_state if (k.startswith("exp") if is_export else not k.startswith("exp"))]:
                     if k not in protected and not k.startswith("ai_"):
                         del st.session_state[k]

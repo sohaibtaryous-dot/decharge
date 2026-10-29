@@ -707,31 +707,13 @@ def resolve_design():
     st.session_state["theme"], st.session_state["anims"] = t, a
 
 
-def _admin_cookie() -> bool:
-    """Navigateur où l'Admin s'est déjà connecté (cookie « timar_ds ») : le bloc « Design » s'affiche aussi avant la connexion."""
-    try:
-        return st.context.cookies.get("timar_ds") == "1"
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def mark_admin_browser():
-    """Pose le cookie « timar_ds » (1 an) dans le navigateur de l'Admin ; une fois par session."""
-    if st.session_state.get("_ds_cookie"):
-        return
-    st.session_state["_ds_cookie"] = True
-    ui.components.html("<script>try{window.parent.document.cookie='timar_ds=1; max-age=31536000; path=/; SameSite=Lax';}catch(e){}</script>", height=0)
-
-
 def design_box(user: dict | None):
     """Barre latérale « Design » : thème + animations. L'Admin choisit pour qui : lui seul (essai) ou tous les utilisateurs.
-    Avant la connexion, le bloc n'apparaît que dans un navigateur où l'Admin s'est déjà connecté (aperçu pour lui seul)."""
+    Avant la connexion, le bloc est toujours visible (aperçu personnel seulement : « Tous les utilisateurs » exige d'être Admin connecté)."""
     import ui_designs
     admin = bool(user and user.get("role") == "admin")
-    if not admin:
-        allowed = (bool(st.session_state.get("_was_admin")) or _admin_cookie()) if user is None else database.get_setting("USER_DESIGN_CHOICE") == "1"
-        if not allowed:
-            return
+    if not admin and user is not None and database.get_setting("USER_DESIGN_CHOICE") != "1":
+        return
     names = list(ui.THEMES)
     site_t, site_a = site_design()
     cur_t, cur_a = st.session_state.get("theme", site_t), st.session_state.get("anims", site_a)
@@ -795,7 +777,7 @@ def _journal(email: str, action: str, detail: str = ""):
 
 def logout():
     _journal((st.session_state.get("auth_user") or {}).get("email", ""), "logout")
-    keep = {k: st.session_state[k] for k in ("design_me", "_was_admin") if k in st.session_state}      # le design essayé reste pour la page de connexion
+    keep = {k: st.session_state[k] for k in ("design_me",) if k in st.session_state}      # le design essayé reste pour la page de connexion
     st.session_state.clear()
     st.session_state.update(keep)
     st.rerun()
