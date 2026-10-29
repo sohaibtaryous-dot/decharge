@@ -97,7 +97,11 @@ IMPORT_FAMILLES = {
     "8544499090": "Câblages", "8546100000": "Isolateurs", "9031800080": "Instruments de mesure",
 }
 
-EXTRA_ARTICLES = [("Armoires électriques et leurs parties", "Armoires électriques")]
+EXTRA_ARTICLES = [("Armoires électriques et leurs parties", "Armoires électriques"),
+                  ("Armoires électriques et pupitre et leurs parties", "Armoires électriques"),
+                  ("Pupitre et leurs parties", "Armoires électriques"),
+                  ("Armoires électriques et pupitre et leurs parties et les accessoires", "Armoires électriques")]
+CUSTOM_ARTICLE = "✍ Autre (je saisis le NGP et la désignation)"     # choix manuel : NGP + désignation tapés dans le site (EXPORT)
 
 
 def load_reference(template_bytes: bytes) -> Reference:
@@ -179,6 +183,7 @@ class Article:
     template_name: str                # désignation à poser en A2 de la feuille ART (pour le VLOOKUP du NGP)
     lines: list[dict] = field(default_factory=list)
     origin: str = ""                  # code pays d'origine (import) ; vide = MA (export)
+    direct_ngp: bool = False          # désignation absente de NGPN (ajout du site / saisie manuelle) : le NGP est écrit directement dans la feuille ART
 
     @property
     def suggested(self) -> int: return sum(1 for l in self.lines if l.get("suggested"))
@@ -360,7 +365,8 @@ def _build_manual(df: pd.DataFrame, reference: Reference, manual: dict, totals: 
     arts: list[Article] = []
     for n in names:
         row = reference.ngpn.get(str(n).casefold())
-        arts.append(Article(row["ngp"], row["rubrique"], row["designation"]) if row else Article("", str(n), str(n)))
+        arts.append(Article(row["ngp"], row["rubrique"], row["designation"], direct_ngp=bool(row.get("extra") or row.get("custom")))
+                    if row else Article("", str(n), str(n)))
     assign = manual.get("assign", {})                              # n° facture -> article
     assign_ref = manual.get("assign_ref")                          # référence -> article (prioritaire : choix par référence)
     notes: list[str] = []
@@ -505,7 +511,7 @@ def fill_template(template_bytes: bytes, vent: Ventilation, destinataire: str, r
     for n, art in enumerate(vent.articles[:MAX_ARTICLES], start=1):
         ws = wb[f"ART{n}"]
         ws["A2"] = art.template_name
-        if art.template_name in {e for e, _ in EXTRA_ARTICLES} and art.ngp:
+        if (art.direct_ngp or art.template_name in {e for e, _ in EXTRA_ARTICLES}) and art.ngp:
             ws["B2"] = int(art.ngp)                                          # désignation absente de NGPN : le NGP est écrit directement
         ws["C2"] = "NB"
         ws["B4"] = "UE"

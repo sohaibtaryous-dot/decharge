@@ -10,6 +10,7 @@ Règle prioritaire : une ligne d'article source = une ligne Excel (jamais de reg
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import re
 import zipfile
@@ -1493,12 +1494,26 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
             noun, tag = "références", "ref"
         st.caption(f"{len(keys)} {noun} détectée(s). Tout ce que vous ne cochez pas dans les articles 2, 3… reste dans l'article 1.")
         chosen, assigned = [], {}
+        boxes: list = []
+        ref_use = ref
         for i in range(n_art):
             pool = defaults + ["Armoires électriques", "Conducteurs électriques"] + names
             dflt = next((p for p in pool if p in names and p not in chosen), names[0])       # chaque article démarre avec une désignation différente
             with st.container(border=True):
-                pick = st.selectbox(f"Article {i + 1} — désignation", names, index=names.index(dflt) if dflt in names else 0,
-                                    format_func=lambda n: f"{n} — NGP {ref.ngpn[n.casefold()]['ngp']}", key=f"{P}_art_{i}")
+                boxes.append(st.container())
+                opts_n = names if imp else names + [vx.CUSTOM_ARTICLE]
+                pick = st.selectbox(f"Article {i + 1} — désignation", opts_n, index=names.index(dflt) if dflt in names else 0,
+                                    format_func=lambda n: n if n == vx.CUSTOM_ARTICLE else f"{n} — NGP {ref.ngpn[n.casefold()]['ngp']}", key=f"{P}_art_{i}")
+                if pick == vx.CUSTOM_ARTICLE:                                             # EXPORT : NGP et désignation saisis à la main
+                    cn, cd = st.columns([1, 3])
+                    cngp = re.sub(r"\D", "", cn.text_input("NGP (10 chiffres)", key=f"{P}_cngp_{i}", max_chars=12))
+                    cdes = cd.text_input("Désignation", key=f"{P}_cdes_{i}").strip()
+                    if len(cngp) == 10 and cdes:
+                        ref_use = dataclasses.replace(ref_use, ngpn={**ref_use.ngpn, cdes.casefold(): {"designation": cdes, "ngp": cngp, "rubrique": cdes, "custom": True}})
+                        pick = cdes
+                    else:
+                        st.warning("Saisissez un NGP de 10 chiffres et une désignation pour cet article.")
+                        pick = names[0]
                 chosen.append(pick)
                 taken = set(assigned)
                 options = [k for k in keys if k not in taken]
@@ -1514,7 +1529,12 @@ def _render_ventilation_section(bl_final: pd.DataFrame, kind: str = "export"):
             manual = {"articles": chosen, "assign": {k: assigned.get(k, 1) for k in keys}}
         else:
             manual = {"articles": chosen, "assign_ref": {vx.norm_ref(k): assigned.get(k, 1) for k in keys}}
-        vent = build_vent(bl_final, ref, manual=manual)
+        vent = build_vent(bl_final, ref_use, manual=manual)
+        for i, (box, art) in enumerate(zip(boxes, vent.articles)):                       # total de chaque article, sous sa case
+            n_sel = sum(1 for v in assigned.values() if v == i + 1) + (rest if i == 0 else 0)
+            with box:
+                st.caption(f"**Total article {i + 1}** : {n_sel} {noun if n_sel != 1 else noun[:-1]} · {len(art.lines)} ligne(s) · "
+                           f"qté {art.qty:g} · valeur {art.value:,.2f}".replace(",", " ") + (f" · NGP {art.ngp}" if art.ngp else ""))
     fix_sig = None
     if fixbox is not None and vent.articles:
         with fixbox:
