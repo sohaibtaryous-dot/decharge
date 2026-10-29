@@ -74,6 +74,24 @@ ANIMS = {
 }
 ENGINE_ANIMS = {"C", "F", "J", "K", "L", "M", "N", "O", "P", "Q", "S", "T", "U", "V"}
 
+# animations choisies automatiquement pour chaque design (déclenchées dès qu'on choisit le thème, modifiables ensuite)
+DEFAULT_ANIMS: dict[int, list[str]] = {
+    1: ["J", "M"], 2: ["U"], 3: ["I"], 4: ["A", "T"], 5: ["G"], 6: ["D", "R"], 7: ["B"], 8: ["I"],
+    9: ["L", "K"], 10: ["J", "E"], 11: ["O", "M"], 12: ["N", "U"], 13: ["O"], 14: ["V"], 15: ["J", "R"], 16: ["R", "T"],
+    17: ["S", "K"], 18: ["J", "M"], 19: ["Q", "R"], 20: ["O", "S"], 21: ["P", "I"], 22: ["Q"], 23: ["U"], 24: ["V", "U"],
+}
+# idem pour « Bleu Port », « Bleu Port (classique) » et les anciens thèmes (pas de design « N · Nom » ci-dessus)
+LEGACY_DEFAULT_ANIMS: dict[str, list[str]] = {
+    "Émeraude": ["I"], "Violet Aurore": ["U"], "Or & Noir": ["R"], "Rouge Cargo": ["A"],
+    "Vice Sunset (style GTA)": ["Q"], "Lunea Café (luxe)": ["U"], "Aurora Glass": ["V"], "Blanc Corporate": ["I"],
+}
+
+
+def default_anims(theme: str) -> list[str]:
+    """Animations à activer automatiquement quand on choisit ce thème (sans rien cocher soi-même)."""
+    s = spec(theme)
+    return list(DEFAULT_ANIMS.get(s[0], [])) if s else list(LEGACY_DEFAULT_ANIMS.get(theme, []))
+
 
 def _rgb(hexv: str) -> str:
     h = hexv.lstrip("#")

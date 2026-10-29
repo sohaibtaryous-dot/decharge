@@ -739,10 +739,17 @@ def design_box(user: dict | None):
     msg = st.session_state.pop("_ds_msg", "")
     if msg:
         st.success(msg)
+    if "_ds_auto_theme" not in st.session_state:                          # ne pas écraser un essai déjà enregistré au premier affichage
+        st.session_state["_ds_auto_theme"] = cur_t
     t = st.selectbox("🎨 Thème", names, index=names.index(cur_t) if cur_t in names else 0, key="ds_theme",
-                     help="« Bleu Port » = design actuel · 1 à 16 = nouveaux designs · « Bleu Port (classique) » = ancien design.")
+                     help="« Bleu Port » = design actuel · 1 à 24 = nouveaux designs · « Bleu Port (classique) » = ancien design. "
+                          "Les animations qui vont avec sont choisies automatiquement — modifiables juste en dessous.")
+    if t != st.session_state["_ds_auto_theme"]:                           # changement de thème : ses animations partent avec lui
+        st.session_state["ds_anims"] = ui_designs.default_anims(t)
+        st.session_state["_ds_auto_theme"] = t
     a = st.multiselect("✨ Animations", list(ui_designs.ANIMS), default=[x for x in cur_a if x in ui_designs.ANIMS], key="ds_anims",
-                       format_func=lambda k: ui_designs.ANIMS[k], placeholder="Aucune")
+                       format_func=lambda k: ui_designs.ANIMS[k], placeholder="Aucune",
+                       help="Se remplit automatiquement avec les animations du thème choisi ; vous pouvez en retirer ou en ajouter.")
     scope = st.radio("Pour qui ?", ["Moi seulement", "Tous les utilisateurs"], key="ds_scope", horizontal=True,
                      help="« Moi seulement » : essai visible par vous seul. « Tous les utilisateurs » : devient le design du site pour tout le monde.") \
         if admin else "Moi seulement"
@@ -762,7 +769,7 @@ def design_box(user: dict | None):
                + (f"  \nVous voyez : **{mine['theme']}**" + (f" + {', '.join(mine.get('anims', []))}" if mine.get("anims") else "") + " (vous seul)" if mine else ""))
     if mine and st.button("Revenir au design du site", use_container_width=True, key="ds_reset", icon=":material/undo:"):
         st.session_state.pop("design_me", None)
-        for k in ("ds_theme", "ds_anims"):
+        for k in ("ds_theme", "ds_anims", "_ds_auto_theme"):
             st.session_state.pop(k, None)
         st.rerun()
     if admin:
