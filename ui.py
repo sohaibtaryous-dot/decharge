@@ -464,9 +464,13 @@ PRO_CSS = """
 /* ---------- Socle ---------- */
 .stApp { background: linear-gradient(180deg, rgba(59,130,246,.05), transparent 260px), var(--bg) !important; }
 .block-container { padding-top: 2.4rem !important; padding-bottom: 2.5rem; max-width: 1320px; }
-[data-testid="stToolbar"], [data-testid="stAppDeployButton"], .stAppDeployButton, .stDeployButton,
+[data-testid="stAppDeployButton"], .stAppDeployButton, .stDeployButton,
 [data-testid="stMainMenu"], [data-testid="stStatusWidget"] { display: none !important; }
-header[data-testid="stHeader"] { background: transparent !important; height: 2.4rem; }
+header[data-testid="stHeader"] { background: transparent !important; height: 2.4rem; overflow: visible; }
+[data-testid="stToolbar"] { background: transparent !important; }
+[data-testid="stExpandSidebarButton"] { color: var(--ink) !important; opacity: .85; }
+[data-testid="stExpandSidebarButton"]:hover { opacity: 1; }
+[data-testid="stExpandSidebarButton"] span { color: var(--ink) !important; }
 .stApp, .stMarkdown, .stMarkdown p, .stMarkdown li { color: var(--ink); }
 ::selection { background: rgba(59,130,246,.35); }
 * { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.28) transparent; }
